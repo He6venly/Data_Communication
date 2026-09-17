@@ -7,6 +7,11 @@ from pathlib import Path
 VALID_NODES = {"Master", "Worker1", "Worker2", "Worker3", "Worker4"}
 VALID_STATUS = {"INFO", "SUCCESS", "FAIL", "WARN"}
 EVENT_DEFINITIONS = {
+    # 통신 메시지 외에 노드 내부 이벤트와 최종 통계도 기록.
+    "INIT": ("LOCAL", "노드 초기화"),
+    "PROC": ("LOCAL", "작업 처리 시작과 성공·실패"),
+    "REASSIGN": ("LOCAL", "실패 작업 우선 큐 등록 및 재할당"),
+    "STAT": ("LOCAL", "최종 통계"),
     "HELLO": ("Worker -> Master", "Worker ID와 P2P 주소 등록"),
     "TASK": ("Master -> Worker", "작업 배정"),
     "TASK_ACK": ("Worker -> Master", "작업을 큐에 받았는지 확인"),
