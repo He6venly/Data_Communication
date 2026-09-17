@@ -204,3 +204,52 @@ class WorkerReadyQueue:
         """현재 Queue 내용을 내부 deque와 분리된 목록으로 반환한다."""
         with self._lock:
             return list(self._queue)
+
+
+class WorkerStorage:
+    """Worker가 성공적으로 처리한 Key-Value를 보관한다."""
+
+    def __init__(self) -> None:
+        """빈 Key-Value 저장소를 만든다."""
+        self._storage: dict[str, int] = {}
+        self._lock = RLock()
+
+    def store(self, task: WorkerTask) -> bool:
+        """새 작업 결과를 저장하고, 이미 저장된 결과이면 False를 반환한다."""
+        if not isinstance(task, WorkerTask):
+            raise TypeError("task는 WorkerTask 객체여야 합니다.")
+
+        # 확인과 저장을 같은 잠금 안에서 처리해 중복 저장을 막는다.
+        with self._lock:
+            if task.key not in self._storage:
+                self._storage[task.key] = task.value
+                return True
+
+            if self._storage[task.key] == task.value:
+                return False
+
+            raise ValueError("같은 key에 다른 value가 이미 저장되어 있습니다.")
+
+    def get_value(self, key: str) -> int | None:
+        """Key에 저장된 Value를 반환하고, 없으면 None을 반환한다."""
+        if not isinstance(key, str):
+            raise TypeError("key는 문자열이어야 합니다.")
+        if len(key) != 4 or any(
+            character not in "0123456789abcdefABCDEF" for character in key
+        ):
+            raise ValueError("key는 정확히 4자리 16진수 문자열이어야 합니다.")
+
+        normalized_key = key.upper()
+
+        with self._lock:
+            return self._storage.get(normalized_key)
+
+    def get_storage_size(self) -> int:
+        """저장된 고유 Key 개수를 반환한다."""
+        with self._lock:
+            return len(self._storage)
+
+    def snapshot(self) -> dict[str, int]:
+        """현재 저장 내용을 내부 dict와 분리된 복사본으로 반환한다."""
+        with self._lock:
+            return self._storage.copy()
