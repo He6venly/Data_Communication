@@ -1,4 +1,4 @@
-"""Worker의 Ready Queue 핵심 자료구조를 제공한다."""
+"""Worker의 Queue, 저장소, 통계 자료구조를 제공한다."""
 
 from __future__ import annotations
 
@@ -253,3 +253,126 @@ class WorkerStorage:
         """현재 저장 내용을 내부 dict와 분리된 복사본으로 반환한다."""
         with self._lock:
             return self._storage.copy()
+
+
+class WorkerStats:
+    """Worker의 처리 결과와 성능 평가 통계를 관리한다."""
+
+    def __init__(self) -> None:
+        """모든 통계값을 0으로 초기화한다."""
+        self.success_count = 0
+        self.failure_count = 0
+        self.processing_start_count = 0
+        self.total_waiting_time = 0.0
+        self.p2p_event_count = 0
+        self.reassignment_count = 0
+        self.total_execution_time = 0.0
+
+        self._recorded_transfer_ids: set[str] = set()
+        self._recorded_reassignments: set[tuple[str, int]] = set()
+        self._lock = RLock()
+
+    def record_processing_start(
+        self, task: WorkerTask, started_at: float
+    ) -> float:
+        """처리 시작을 기록하고 작업의 대기시간을 반환한다."""
+        if not isinstance(task, WorkerTask):
+            raise TypeError("task는 WorkerTask 객체여야 합니다.")
+        if isinstance(started_at, bool) or not isinstance(started_at, (int, float)):
+            raise TypeError("started_at은 숫자여야 합니다.")
+        if not math.isfinite(started_at):
+            raise ValueError("started_at은 유한한 숫자여야 합니다.")
+        if started_at < 0:
+            raise ValueError("started_at은 0 이상이어야 합니다.")
+        if started_at < task.enqueued_at:
+            raise ValueError("started_at은 task.enqueued_at보다 빠를 수 없습니다.")
+
+        waiting_time = float(started_at) - task.enqueued_at
+
+        # 합계와 횟수를 같은 잠금 안에서 변경해 평균 계산이 어긋나지 않게 한다.
+        with self._lock:
+            self.total_waiting_time += waiting_time
+            self.processing_start_count += 1
+
+        return waiting_time
+
+    def record_success(self) -> None:
+        """성공적으로 저장한 고유 KV 수를 1 증가시킨다."""
+        with self._lock:
+            self.success_count += 1
+
+    def record_failure(self) -> None:
+        """작업 처리 실패 횟수를 1 증가시킨다."""
+        with self._lock:
+            self.failure_count += 1
+
+    def record_p2p_event(self, transfer_id: str) -> bool:
+        """완료된 고유 P2P 전송을 한 번만 기록한다."""
+        _validate_transfer_id(transfer_id)
+
+        # 같은 전송의 ACK가 다시 처리되어도 이벤트 수를 중복 증가시키지 않는다.
+        with self._lock:
+            if transfer_id in self._recorded_transfer_ids:
+                return False
+
+            self._recorded_transfer_ids.add(transfer_id)
+            self.p2p_event_count += 1
+            return True
+
+    def record_reassignment(self, task: WorkerTask) -> bool:
+        """새로운 재할당 작업을 한 번만 기록한다."""
+        if not isinstance(task, WorkerTask):
+            raise TypeError("task는 WorkerTask 객체여야 합니다.")
+        if task.attempt == 1:
+            return False
+
+        reassignment_id = (task.key, task.attempt)
+
+        # Key와 시도 번호가 같은 재할당은 중복 집계하지 않는다.
+        with self._lock:
+            if reassignment_id in self._recorded_reassignments:
+                return False
+
+            self._recorded_reassignments.add(reassignment_id)
+            self.reassignment_count += 1
+            return True
+
+    def set_total_execution_time(self, total_time: float) -> None:
+        """Master가 전달한 가상 전체 수행시간을 저장한다."""
+        if isinstance(total_time, bool) or not isinstance(total_time, (int, float)):
+            raise TypeError("total_time은 숫자여야 합니다.")
+        if not math.isfinite(total_time):
+            raise ValueError("total_time은 유한한 숫자여야 합니다.")
+        if total_time < 0:
+            raise ValueError("total_time은 0 이상이어야 합니다.")
+
+        with self._lock:
+            self.total_execution_time = float(total_time)
+
+    def get_average_waiting_time(self) -> float:
+        """처리를 시작한 작업들의 평균 대기시간을 반환한다."""
+        with self._lock:
+            if self.processing_start_count == 0:
+                return 0.0
+
+            return self.total_waiting_time / self.processing_start_count
+
+    def snapshot(self) -> dict[str, int | float]:
+        """성능 평가에 필요한 현재 통계를 새 dict로 반환한다."""
+        with self._lock:
+            if self.processing_start_count == 0:
+                average_waiting_time = 0.0
+            else:
+                average_waiting_time = (
+                    self.total_waiting_time / self.processing_start_count
+                )
+
+            return {
+                "throughput": self.success_count,
+                "success_count": self.success_count,
+                "failure_count": self.failure_count,
+                "average_waiting_time": average_waiting_time,
+                "p2p_event_count": self.p2p_event_count,
+                "reassignment_count": self.reassignment_count,
+                "total_execution_time": self.total_execution_time,
+            }
