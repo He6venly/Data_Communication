@@ -40,6 +40,8 @@ class WorkerTask:
     attempt: int
     enqueued_at: float
     reserved_transfer_id: str | None = None
+    failed_retry: bool = False
+    accumulated_waiting_time: float = 0.0
 
     def __post_init__(self) -> None:
         """작업 입력값을 검증하고 key를 대문자로 정규화한다."""
@@ -70,8 +72,60 @@ class WorkerTask:
         if self.reserved_transfer_id is not None:
             _validate_transfer_id(self.reserved_transfer_id)
 
+        if type(self.failed_retry) is not bool:
+            raise TypeError("failed_retry는 bool이어야 합니다.")
+
+        if isinstance(self.accumulated_waiting_time, bool) or not isinstance(
+            self.accumulated_waiting_time, (int, float)
+        ):
+            raise TypeError("accumulated_waiting_time은 숫자여야 합니다.")
+        if not math.isfinite(self.accumulated_waiting_time):
+            raise ValueError("accumulated_waiting_time은 유한한 숫자여야 합니다.")
+        if self.accumulated_waiting_time < 0:
+            raise ValueError("accumulated_waiting_time은 0 이상이어야 합니다.")
+
         object.__setattr__(self, "key", self.key.upper())
         object.__setattr__(self, "enqueued_at", float(self.enqueued_at))
+        object.__setattr__(
+            self, "accumulated_waiting_time", float(self.accumulated_waiting_time)
+        )
+
+    def for_p2p_transfer(
+        self, transfer_started_at: float, new_enqueued_at: float
+    ) -> WorkerTask:
+        """P2P 이전 전 대기시간을 보존한 새 Worker용 작업을 반환한다."""
+        if isinstance(transfer_started_at, bool) or not isinstance(
+            transfer_started_at, (int, float)
+        ):
+            raise TypeError("transfer_started_at은 숫자여야 합니다.")
+        if not math.isfinite(transfer_started_at) or transfer_started_at < 0:
+            raise ValueError("transfer_started_at은 0 이상의 유한한 숫자여야 합니다.")
+        if transfer_started_at < self.enqueued_at:
+            raise ValueError(
+                "transfer_started_at은 현재 enqueued_at보다 빠를 수 없습니다."
+            )
+
+        if isinstance(new_enqueued_at, bool) or not isinstance(
+            new_enqueued_at, (int, float)
+        ):
+            raise TypeError("new_enqueued_at은 숫자여야 합니다.")
+        if not math.isfinite(new_enqueued_at) or new_enqueued_at < 0:
+            raise ValueError("new_enqueued_at은 0 이상의 유한한 숫자여야 합니다.")
+        if new_enqueued_at < transfer_started_at:
+            raise ValueError(
+                "new_enqueued_at은 transfer_started_at보다 빠를 수 없습니다."
+            )
+
+        waiting_before_transfer = float(transfer_started_at) - self.enqueued_at
+
+        return replace(
+            self,
+            enqueued_at=float(new_enqueued_at),
+            reserved_transfer_id=None,
+            accumulated_waiting_time=(
+                self.accumulated_waiting_time + waiting_before_transfer
+            ),
+        )
 
 
 class WorkerReadyQueue:
@@ -86,6 +140,7 @@ class WorkerReadyQueue:
 
         self._queue: deque[WorkerTask] = deque()
         self._max_size = max_size
+        self._completed_transfer_ids: set[str] = set()
         self._lock = RLock()
 
     def get_queue_size(self) -> int:
@@ -143,6 +198,9 @@ class WorkerReadyQueue:
 
         # 탐색과 예약 표시를 한 잠금 안에서 수행해 중복 예약을 막는다.
         with self._lock:
+            if transfer_id in self._completed_transfer_ids:
+                return []
+
             # 최초 호출과 같은 순서를 유지하기 위해 뒤쪽부터 기존 예약을 찾는다.
             for index in range(len(self._queue) - 1, -1, -1):
                 task = self._queue[index]
@@ -174,6 +232,9 @@ class WorkerReadyQueue:
 
         # 원래 Queue 순서를 유지하면서 예약이 일치하지 않는 작업만 남긴다.
         with self._lock:
+            if transfer_id in self._completed_transfer_ids:
+                return []
+
             remaining_tasks: deque[WorkerTask] = deque()
 
             for task in self._queue:
@@ -183,6 +244,9 @@ class WorkerReadyQueue:
                     remaining_tasks.append(task)
 
             self._queue = remaining_tasks
+
+            if removed_tasks:
+                self._completed_transfer_ids.add(transfer_id)
 
         return removed_tasks
 
@@ -287,7 +351,9 @@ class WorkerStats:
         if started_at < task.enqueued_at:
             raise ValueError("started_at은 task.enqueued_at보다 빠를 수 없습니다.")
 
-        waiting_time = float(started_at) - task.enqueued_at
+        waiting_time = (
+            task.accumulated_waiting_time + float(started_at) - task.enqueued_at
+        )
 
         # 합계와 횟수를 같은 잠금 안에서 변경해 평균 계산이 어긋나지 않게 한다.
         with self._lock:
@@ -323,7 +389,7 @@ class WorkerStats:
         """새로운 재할당 작업을 한 번만 기록한다."""
         if not isinstance(task, WorkerTask):
             raise TypeError("task는 WorkerTask 객체여야 합니다.")
-        if task.attempt == 1:
+        if not task.failed_retry:
             return False
 
         reassignment_id = (task.key, task.attempt)
