@@ -1,4 +1,4 @@
-"""Worker의 자료구조와 Master 연결 및 작업 처리를 제공한다."""
+"""Worker의 자료구조, Master 연결, 작업 처리와 P2P 이전을 제공한다."""
 
 from __future__ import annotations
 
@@ -7,13 +7,27 @@ import random
 import socket
 from collections import deque
 from dataclasses import dataclass, replace
-from threading import RLock
+from threading import Event, RLock, Thread
 
 from logger import NodeLogger
+from p2p import P2PNode, clean_tasks
 from protocol import ConnectionClosed, InvalidMessage, JsonLineConnection
 
 
 MAX_QUEUE_SIZE = 10
+
+
+def _unique_communication_ids(message_ids: list[str]) -> list[str]:
+    """처음 등장한 순서를 유지하면서 통신 ID의 중복을 제거한다."""
+    result = []
+    seen = set()
+    for message_id in message_ids:
+        if not isinstance(message_id, str) or not message_id.strip():
+            raise ValueError("communication_ids에는 비어 있지 않은 문자열이 필요합니다.")
+        if message_id not in seen:
+            seen.add(message_id)
+            result.append(message_id)
+    return result
 
 
 def _validate_transfer_id(transfer_id: str) -> None:
@@ -504,6 +518,20 @@ class Worker:
         self.rng = random.Random(seed)
         self._message_lock = RLock()
         self._responses: dict[str, dict | None] = {}
+        self._state_lock = RLock()
+        self.timeout = 60
+        self.p2p = P2PNode(
+            worker_id, peer_host, peer_port,
+            self.ready_queue.get_queue_state, self._receive_transfer,
+        )
+        self._closing = Event()
+        self._pending_times: dict[str, dict] = {}
+        self._received_transfers: dict[str, dict] = {}
+        self._outgoing_transfers: dict[str, dict] = {}
+        self._incoming_slots = 0
+        self._active_p2p_check: str | None = None
+        self._p2p_threads: list[Thread] = []
+        self._p2p_failed = False
 
     @property
     def queue_version(self) -> int:
@@ -517,6 +545,8 @@ class Worker:
 
     def create_message(self, kind: str, **data) -> dict:
         """새 논리 메시지의 ID와 공통 필드를 만든다."""
+        if kind in {"P2P_TIME", "P2P_COST", "P2P_TRANSFER", "P2P_FAILURE"}:
+            data["communication_ids"] = _unique_communication_ids(data["communication_ids"])
         with self._message_lock:
             self.message_number += 1
             return {
@@ -583,6 +613,9 @@ class Worker:
         if worker_ids != {1, 2, 3, 4}:
             raise ValueError("Worker 4개의 주소가 필요합니다.")
         self.peers = [peer.copy() for peer in peers]
+        self.p2p.set_peers(self.peers)
+        self.p2p.start()
+        self.log("INIT", "SUCCESS", f"P2P 서버 시작 {self.peer_host}:{self.peer_port}")
         return self.create_message("READY", request_id=message["message_id"])
 
     def _handle_task(self, message: dict) -> dict:
@@ -596,7 +629,9 @@ class Worker:
 
         # 확인 대기 작업도 자리를 차지한다. 아직 처리 가능한 Queue에는 넣지 않는다.
         with self.ready_queue._lock:
-            accepted = self.ready_queue.has_capacity(len(self.pending_tasks) + 1)
+            accepted = self.ready_queue.has_capacity(
+                len(self.pending_tasks) + self._incoming_slots + 1
+            )
             size, version = self.ready_queue.get_queue_state()
             response = self.create_message(
                 "TASK_ACK", request_id=message["message_id"], key=key,
@@ -642,7 +677,7 @@ class Worker:
 
     def start_next_task(self) -> None:
         """처리 중인 작업이 없으면 PROCESS_START를 보내고 수신 반복으로 돌아간다."""
-        if not self.running or not self.ready or self.current_task is not None:
+        if self._p2p_failed or not self.running or not self.ready or self.current_task is not None:
             return
         with self.ready_queue._lock:
             before, _ = self.ready_queue.get_queue_state()
@@ -694,12 +729,322 @@ class Worker:
             queue_size=size, queue_version=version,
         )
 
-    def _handle_p2p_check(self, message: dict) -> dict:
-        """P2P 미연동 상태에서 작업 이전 없이 점검 완료를 보고한다."""
-        self.log("P2P_TRANSFER", "INFO", "P2P 미연동 상태로 이전 없이 점검 완료")
-        return self.create_message(
-            "P2P_COST", request_id=message["message_id"], communication_ids=[],
+    def _report_p2p_queue(self, before: int, state: tuple[int, int], clock: float) -> None:
+        """P2P로 바뀐 Queue의 버전과 경고를 보고한다. Queue 잠금 밖에서 호출한다."""
+        size, version = state
+        self._log_queue_change(before, size, clock)
+        self.send_message(self.create_message(
+            "QUEUE_STATUS", queue_size=size, queue_version=version,
+        ))
+
+    def _request_p2p_time(
+        self, transfer_id: str, source: int, target: int, phase: str,
+        communication_ids: list[str],
+    ) -> float:
+        """P2P 스레드에서 확정 시각을 기다린다. Master 수신 스레드는 기다리지 않는다."""
+        with self._state_lock:
+            if self._closing.is_set():
+                raise ConnectionClosed("Worker가 종료 중입니다.")
+            request = self.create_message(
+                "P2P_TIME", transfer_id=transfer_id, source=source, target=target,
+                phase=phase, communication_ids=communication_ids,
+            )
+            pending = {
+                "transfer_id": transfer_id, "phase": phase,
+                "event": Event(), "response": None,
+            }
+            self._pending_times[request["message_id"]] = pending
+
+        # 응답이 바로 와도 놓치지 않도록 먼저 등록하고, 잠금을 풀고 송신·대기한다.
+        try:
+            self.send_message(request)
+            if not pending["event"].wait(self.timeout):
+                raise TimeoutError(f"TIME_ACK 시간 초과: {transfer_id} {phase}")
+            with self._state_lock:
+                if self._closing.is_set() or pending["response"] is None:
+                    raise ConnectionClosed("TIME_ACK 대기 중 Worker가 종료되었습니다.")
+                return pending["response"]["event_at"]
+        finally:
+            with self._state_lock:
+                self._pending_times.pop(request["message_id"], None)
+
+    def _handle_time_ack(self, message: dict) -> None:
+        """요청 ID, 이전 ID, 단계가 모두 맞는 대기 스레드에만 시각을 전달한다."""
+        pending = self._pending_times.get(message["request_id"])
+        if pending is None:
+            self.log("P2P_TRANSFER", "WARN", "대기가 끝난 TIME_ACK 수신, 예약 상태 유지")
+            return
+        if (message["transfer_id"] != pending["transfer_id"]
+                or message["phase"] != pending["phase"]):
+            raise ValueError("TIME_ACK의 전송 ID 또는 단계가 요청과 다릅니다.")
+        event_at = self._read_time(message, "event_at")
+        if event_at > self.clock:
+            raise ValueError("P2P 이벤트 시각이 Master 시각보다 늦습니다.")
+        if pending["response"] is not None and pending["response"]["event_at"] != event_at:
+            raise ValueError("같은 P2P 시각 요청에 다른 시각이 전달되었습니다.")
+        pending["response"] = message.copy()
+        pending["event"].set()
+
+    def _receive_transfer(
+        self, transfer_id: str, source_id: int, tasks: list[dict], transfer_message_id: str,
+    ) -> tuple[bool, str]:
+        """P2PNode 콜백: 공간을 확보하고 수신 시각을 받아 예약된 작업을 넣는다."""
+        _validate_transfer_id(transfer_id)
+        if not isinstance(transfer_message_id, str) or not transfer_message_id.strip():
+            raise ValueError("P2P 직접 전송의 message_id가 필요합니다.")
+        if type(source_id) is not int or source_id not in range(1, 5) or source_id == self.worker_id:
+            raise ValueError("P2P 송신 Worker ID가 올바르지 않습니다.")
+        incoming = [WorkerTask(**item) for item in clean_tasks(tasks)]
+        started_at = incoming[0].enqueued_at
+        if any(task.enqueued_at != started_at for task in incoming):
+            raise ValueError("한 번에 이전할 작업의 SEND 시각은 같아야 합니다.")
+
+        with self._state_lock:
+            if self._closing.is_set():
+                raise ConnectionClosed("Worker가 종료 중입니다.")
+            previous = self._received_transfers.get(transfer_id)
+            if previous is not None:
+                if previous["source"] != source_id or previous["tasks"] != incoming:
+                    return False, "같은 transfer_id의 송신자 또는 작업 내용이 다릅니다."
+                if previous["status"] in {"ACCEPTED", "CONFIRMED"}:
+                    return True, "이미 수신한 이전입니다."
+                if previous["status"] == "REJECTED":
+                    return False, "Queue 공간 부족으로 거절한 이전입니다."
+                raise TimeoutError("기존 이전의 수신 시각이 아직 확정되지 않았습니다.")
+            record = {"source": source_id, "tasks": incoming, "status": "PENDING"}
+            self._received_transfers[transfer_id] = record
+            with self.ready_queue._lock:
+                needed = len(self.pending_tasks) + self._incoming_slots + len(incoming)
+                if not self.ready_queue.has_capacity(needed):
+                    record["status"] = "REJECTED"
+                    return False, "전체 작업을 받을 Queue 공간이 부족합니다."
+                # TIME_ACK 대기 중 Master 작업이 이 공간을 차지하지 못하게 한다.
+                self._incoming_slots += len(incoming)
+
+        try:
+            # 잠금을 풀고 기다린다. 직접 전송 비용은 RECV 시각 확정 전에 반영한다.
+            arrived_at = self._request_p2p_time(
+                transfer_id, source_id, self.worker_id, "RECV", [transfer_message_id],
+            )
+            if arrived_at < started_at:
+                raise ValueError("RECV 시각이 SEND 시각보다 빠릅니다.")
+            with self._state_lock:
+                if self._closing.is_set():
+                    raise ConnectionClosed("P2P 수신 확정 중 Worker가 종료되었습니다.")
+                changes = []
+                with self.ready_queue._lock:
+                    for task in incoming:
+                        before, _ = self.ready_queue.get_queue_state()
+                        received_task = replace(
+                            task, enqueued_at=arrived_at, reserved_transfer_id=transfer_id,
+                        )
+                        if not self.ready_queue.enqueue(received_task):
+                            raise RuntimeError("P2P 수신을 위해 확보한 Queue 공간이 부족합니다.")
+                        changes.append((before, self.ready_queue.get_queue_state()))
+                    self._incoming_slots -= len(incoming)
+                record.update(status="ACCEPTED", arrived_at=arrived_at, started_at=started_at)
+                for before, state in changes:
+                    self._report_p2p_queue(before, state, arrived_at)
+                self.log("P2P_ACK", "INFO", f"id={transfer_id} 수신, Master 이전 확정 대기", arrived_at)
+            return True, f"작업 {len(incoming)}개 수신 완료"
+        except Exception:
+            with self._state_lock:
+                # 불확실한 수신은 거절로 응답하지 않는다. 확보한 공간과 작업을 보존한다.
+                if record["status"] == "PENDING":
+                    record["status"] = "UNKNOWN"
+                self.log("P2P_ACK", "WARN", f"id={transfer_id} 수신 확인 미완료, 상태 보존")
+            raise
+
+    def _handle_transfer_confirmed(self, message: dict) -> dict:
+        """Master가 소유권을 확정한 이전만 예약 해제하고 한 번 집계한다."""
+        transfer_id = message["transfer_id"]
+        _validate_transfer_id(transfer_id)
+        record = self._received_transfers.get(transfer_id)
+        if record is None or record["status"] not in {"ACCEPTED", "CONFIRMED"}:
+            raise ValueError("수신 완료되지 않은 이전의 TRANSFER_CONFIRMED입니다.")
+        # 현재 Master는 source 필드 대신 송신 보고의 message_id를 request_id로 전달한다.
+        request_id = message["request_id"]
+        prefix = f"worker-{record['source']}-"
+        if (not isinstance(request_id, str) or not request_id.startswith(prefix)
+                or not request_id[len(prefix):].isdigit()):
+            raise ValueError("이전 확정의 송신 Worker가 수신 기록과 다릅니다.")
+        identities = [self._task_identity(item) for item in message["tasks"]]
+        expected = [(task.key, task.attempt) for task in record["tasks"]]
+        if sorted(identities) != sorted(expected):
+            raise ValueError("이전 확정 작업 목록이 수신 기록과 다릅니다.")
+        if (self._read_time(message, "transfer_started_at") != record["started_at"]
+                or self._read_time(message, "new_enqueued_at") != record["arrived_at"]):
+            raise ValueError("이전 확정 시각이 TIME_ACK와 다릅니다.")
+        if record["status"] == "CONFIRMED":
+            if request_id != record["request_id"]:
+                raise ValueError("같은 이전을 확정한 원래 요청 ID가 다릅니다.")
+            return record["response"]
+
+        with self.ready_queue._lock:
+            before, _ = self.ready_queue.get_queue_state()
+            reserved = [
+                (task.key, task.attempt) for task in self.ready_queue.snapshot()
+                if task.reserved_transfer_id == transfer_id
+            ]
+            if sorted(reserved) != sorted(expected):
+                raise ValueError("이전 확정 작업의 Queue 예약 목록이 다릅니다.")
+            self.ready_queue.cancel_transfer(transfer_id)
+            size, version = self.ready_queue.get_queue_state()
+        self._log_queue_change(before, size, self.clock)
+        self.stats.record_p2p_event(transfer_id)
+        self.log("P2P_TRANSFER", "SUCCESS", f"id={transfer_id} 수신 작업 처리 가능")
+        response = self.create_message(
+            "QUEUE_STATUS", request_id=message["message_id"],
+            queue_size=size, queue_version=version,
         )
+        record.update(status="CONFIRMED", request_id=request_id, response=response)
+        return response
+
+    def _handle_p2p_check(self, message: dict) -> None:
+        """조회·이전은 별도 스레드에 맡겨 Master 수신 반복문을 유지한다."""
+        if self._p2p_failed:
+            return
+        if self._active_p2p_check is not None:
+            raise ValueError("기존 P2P 점검이 아직 끝나지 않았습니다.")
+        self._active_p2p_check = message["message_id"]
+        self._p2p_threads = [thread for thread in self._p2p_threads if thread.is_alive()]
+        thread = Thread(
+            target=self._run_p2p_check, args=(message.copy(),),
+            name=f"Worker{self.worker_id}-P2P-check",
+        )
+        self._p2p_threads.append(thread)
+        thread.start()
+
+    def _finish_p2p_check(self, request_id: str, response: dict) -> None:
+        """완료 응답을 캐시에 보관해 같은 점검 요청에는 같은 메시지를 재전송한다."""
+        with self._state_lock:
+            self._responses[request_id] = response
+            self._active_p2p_check = None
+            if response["type"] == "P2P_FAILURE":
+                self._p2p_failed = True
+            if not self._closing.is_set():
+                self.send_message(response)
+                if not self._p2p_failed:
+                    self.start_next_task()
+
+    def _run_p2p_check(self, message: dict) -> None:
+        """이웃 조회, SEND 시각 확정, 직접 전송과 수신 상태 확인을 순서대로 수행한다."""
+        request_id = message["message_id"]
+        transfer_id = f"transfer-{self.worker_id}-{request_id}"
+        try:
+            with self._state_lock:
+                size, version = self.ready_queue.get_queue_state()
+                clock = self.clock
+            target = self.p2p.find_transfer_target(size, clock)
+            communication_ids = _unique_communication_ids(target["communication_ids"])
+            target_id = target["target_worker_id"]
+            with self._state_lock:
+                if self._closing.is_set():
+                    return
+                with self.ready_queue._lock:
+                    before, current_version = self.ready_queue.get_queue_state()
+                    count = target["transfer_count"]
+                    if target_id is not None and current_version != version:
+                        count = min(count, max(0, (before - target["target_queue_size"]) // 2))
+                    tasks = []
+                    if target_id is not None and count > 0:
+                        tasks = self.ready_queue.reserve_for_transfer(transfer_id, count)
+                    state = self.ready_queue.get_queue_state()
+                if not tasks:
+                    response = self.create_message(
+                        "P2P_COST", request_id=request_id, communication_ids=communication_ids,
+                    )
+                    self._finish_p2p_check(request_id, response)
+                    return
+                record = {
+                    "request_id": request_id, "target": target_id, "tasks": tasks,
+                    "status": "RESERVED", "communication_ids": communication_ids,
+                }
+                self._outgoing_transfers[transfer_id] = record
+                self._report_p2p_queue(before, state, self.clock)
+
+            started_at = self._request_p2p_time(
+                transfer_id, self.worker_id, target_id, "SEND", communication_ids,
+            )
+            payload = []
+            for task in tasks:
+                moved = task.for_p2p_transfer(started_at, started_at)
+                payload.append({
+                    "key": moved.key, "value": moved.value, "attempt": moved.attempt,
+                    "enqueued_at": moved.enqueued_at, "failed_retry": moved.failed_retry,
+                    "accumulated_waiting_time": moved.accumulated_waiting_time,
+                })
+            if self._closing.is_set():
+                return
+            result = self.p2p.send_transfer(target_id, transfer_id, payload, started_at)
+            communication_ids = _unique_communication_ids(communication_ids + result["communication_ids"])
+            with self._state_lock:
+                record["communication_ids"] = communication_ids
+            for _ in range(3):
+                if result["status"] != "UNKNOWN" or self._closing.is_set():
+                    break
+                with self._state_lock:
+                    clock = self.clock
+                result = self.p2p.check_transfer(target_id, transfer_id, clock)
+                communication_ids = _unique_communication_ids(communication_ids + result["communication_ids"])
+                with self._state_lock:
+                    record["communication_ids"] = communication_ids
+
+            with self._state_lock:
+                record.update(status=result["status"], communication_ids=communication_ids)
+                if self._closing.is_set():
+                    return
+                if result["status"] == "UNKNOWN":
+                    reason = f"상태 조회 3회 모두 UNKNOWN: {result['reason']}"
+                    record.update(status="UNRECOVERABLE_UNKNOWN", reason=reason)
+                    response = self.create_message(
+                        "P2P_FAILURE", request_id=request_id, transfer_id=transfer_id,
+                        source=self.worker_id, target=target_id, reason=reason,
+                        communication_ids=communication_ids,
+                    )
+                    self.log("P2P_TRANSFER", "FAIL", f"id={transfer_id} {reason}, 예약 유지")
+                    self._finish_p2p_check(request_id, response)
+                    return
+                with self.ready_queue._lock:
+                    before, _ = self.ready_queue.get_queue_state()
+                    if result["status"] == "ACCEPTED":
+                        self.ready_queue.confirm_transfer(transfer_id)
+                    elif result["status"] == "REJECTED":
+                        self.ready_queue.cancel_transfer(transfer_id)
+                    else:
+                        raise ValueError("알 수 없는 P2P 이전 결과입니다.")
+                    state = self.ready_queue.get_queue_state()
+                self._report_p2p_queue(before, state, self.clock)
+                if result["status"] == "ACCEPTED":
+                    self.stats.record_p2p_event(transfer_id)
+                    response = self.create_message(
+                        "P2P_TRANSFER", request_id=request_id, transfer_id=transfer_id,
+                        source=self.worker_id, target=target_id,
+                        tasks=[{"key": task.key, "attempt": task.attempt} for task in tasks],
+                        communication_ids=communication_ids,
+                    )
+                else:
+                    response = self.create_message(
+                        "P2P_COST", request_id=request_id, transfer_id=transfer_id,
+                        communication_ids=communication_ids,
+                    )
+                self.log("P2P_ACK", "INFO", f"id={transfer_id} {result['status']}: {result['reason']}")
+                self._finish_p2p_check(request_id, response)
+        except Exception as error:
+            with self._state_lock:
+                self.log("P2P_TRANSFER", "WARN", f"id={transfer_id} 점검 중단, 예약 유지: {error}")
+
+    def _stop_p2p(self) -> None:
+        """시각 대기를 깨운 후 P2P 서버와 점검 스레드를 정리한다."""
+        self._closing.set()
+        with self._state_lock:
+            for pending in self._pending_times.values():
+                pending["event"].set()
+            threads = list(self._p2p_threads)
+        self.p2p.stop()
+        # P2PNode의 소켓 호출은 timeout이 있으며, 종료 후에는 다음 전송을 시작하지 않는다.
+        for thread in threads:
+            thread.join()
 
     def _handle_stop(self, message: dict) -> dict:
         """Master가 전달한 종료 기준 통계를 STOP_ACK로 반환한다."""
@@ -716,7 +1061,12 @@ class Worker:
         )
 
     def handle_message(self, message: dict) -> None:
-        """Master 메시지 하나를 처리한다. 상태 변경은 수신 스레드에서만 수행한다."""
+        """Master 메시지 처리와 P2P 스레드의 상태 변경이 겹치지 않게 한다."""
+        with self._state_lock:
+            self._handle_master_message(message)
+
+    def _handle_master_message(self, message: dict) -> None:
+        """Master 수신은 한 스레드만 담당하며 여기서는 TIME_ACK를 기다리지 않는다."""
         if not isinstance(message, dict):
             raise InvalidMessage("Master 메시지는 dict여야 합니다.")
         if message.get("sender") != "MASTER" or message.get("receiver") != f"WORKER{self.worker_id}":
@@ -748,6 +1098,10 @@ class Worker:
             response = self._handle_process_ack(message)
         elif kind == "P2P_CHECK":
             response = self._handle_p2p_check(message)
+        elif kind == "TIME_ACK":
+            response = self._handle_time_ack(message)
+        elif kind == "TRANSFER_CONFIRMED":
+            response = self._handle_transfer_confirmed(message)
         elif kind == "STOP":
             response = self._handle_stop(message)
         else:
@@ -768,14 +1122,18 @@ class Worker:
             self.running = False
             self.log("STOP_ACK", "SUCCESS", "최종 통계 응답 전송 완료")
 
-        # 점검 응답만으로 Queue 내용이나 버전이 바뀌지 않게 한다.
-        if kind != "P2P_CHECK":
+        # 점검 스레드가 예약 대상을 고를 수 있도록 이 요청에서는 다음 작업을 꺼내지 않는다.
+        if kind != "P2P_CHECK" and not self._p2p_failed:
             self.start_next_task()
 
     def run(self, timeout=60) -> None:
         """Master에 등록하고 STOP까지 메시지를 수신한다."""
         if self.running:
             raise RuntimeError("이미 실행 중인 Worker입니다.")
+        if type(timeout) not in (int, float) or not math.isfinite(timeout) or timeout <= 0:
+            raise ValueError("timeout은 유한한 양수여야 합니다.")
+        self.timeout = timeout
+        self.p2p.timeout = min(5, timeout)
         try:
             self.logger = NodeLogger(f"Worker{self.worker_id}", self.log_dir)
             self.log("INIT", "INFO", "Worker 초기화")
@@ -802,6 +1160,7 @@ class Worker:
                 except OSError:
                     pass
                 self.sock.close()
+            self._stop_p2p()
             if self.logger is not None:
                 try:
                     self.log("STOP", "INFO", "연결 종료")
