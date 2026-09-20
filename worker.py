@@ -694,6 +694,13 @@ class Worker:
             queue_size=size, queue_version=version,
         )
 
+    def _handle_p2p_check(self, message: dict) -> dict:
+        """P2P 미연동 상태에서 작업 이전 없이 점검 완료를 보고한다."""
+        self.log("P2P_TRANSFER", "INFO", "P2P 미연동 상태로 이전 없이 점검 완료")
+        return self.create_message(
+            "P2P_COST", request_id=message["message_id"], communication_ids=[],
+        )
+
     def _handle_stop(self, message: dict) -> dict:
         """Master가 전달한 종료 기준 통계를 STOP_ACK로 반환한다."""
         total_time = self._read_time(message, "total_execution_time")
@@ -739,6 +746,8 @@ class Worker:
             response = self._handle_task_confirmed(message)
         elif kind == "PROCESS_ACK":
             response = self._handle_process_ack(message)
+        elif kind == "P2P_CHECK":
+            response = self._handle_p2p_check(message)
         elif kind == "STOP":
             response = self._handle_stop(message)
         else:
@@ -759,7 +768,9 @@ class Worker:
             self.running = False
             self.log("STOP_ACK", "SUCCESS", "최종 통계 응답 전송 완료")
 
-        self.start_next_task()
+        # 점검 응답만으로 Queue 내용이나 버전이 바뀌지 않게 한다.
+        if kind != "P2P_CHECK":
+            self.start_next_task()
 
     def run(self, timeout=60) -> None:
         """Master에 등록하고 STOP까지 메시지를 수신한다."""
