@@ -532,6 +532,7 @@ class Worker:
         self._active_p2p_check: str | None = None
         self._p2p_threads: list[Thread] = []
         self._p2p_failed = False
+        self._p2p_error: Exception | None = None
 
     @property
     def queue_version(self) -> int:
@@ -927,13 +928,64 @@ class Worker:
                 if not self._p2p_failed:
                     self.start_next_task()
 
+    def _handle_p2p_exception(
+        self, request_id: str, transfer_id: str, target_id: int | None,
+        send_confirmed: bool, communication_ids: list[str], error: Exception,
+    ) -> None:
+        """보고 가능한 이전은 Master에 알리고, 그 외 예외는 메인 run()으로 전달한다."""
+        with self._state_lock:
+            self._active_p2p_check = None
+            if self._closing.is_set():
+                return
+            self._p2p_failed = True
+            reason = f"P2P 점검 예외: {type(error).__name__}: {error}"
+            record = self._outgoing_transfers.get(transfer_id)
+            if record is not None:
+                record["error"] = reason
+
+            # 최종 보고가 이미 만들어졌다면 Master가 이전 정보를 정리했을 수 있다.
+            if send_confirmed and self._responses.get(request_id) is None:
+                try:
+                    response = self.create_message(
+                        "P2P_FAILURE", request_id=request_id, transfer_id=transfer_id,
+                        source=self.worker_id, target=target_id, reason=reason,
+                        communication_ids=communication_ids,
+                    )
+                    self.log("P2P_TRANSFER", "FAIL", f"id={transfer_id} {reason}, 예약 유지")
+                    self._finish_p2p_check(request_id, response)
+                    return
+                except Exception:
+                    # 실패 보고도 보낼 수 없으면 원래 P2P 예외를 메인 스레드에 넘긴다.
+                    pass
+            if self._p2p_error is None:
+                self._p2p_error = error
+            sock = self.sock
+
+        # recv()와 Master의 연결 대기를 깨운다. close와 스레드 정리는 run()이 맡는다.
+        if sock is not None:
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+
     def _run_p2p_check(self, message: dict) -> None:
         """이웃 조회, SEND 시각 확정, 직접 전송과 수신 상태 확인을 순서대로 수행한다."""
         request_id = message["message_id"]
         transfer_id = f"transfer-{self.worker_id}-{request_id}"
+        target_id = None
+        communication_ids = []
+        send_confirmed = False
         try:
             with self._state_lock:
+                if self._closing.is_set():
+                    return
                 size, version = self.ready_queue.get_queue_state()
+                if size * 2 <= 15:
+                    response = self.create_message(
+                        "P2P_COST", request_id=request_id, communication_ids=[],
+                    )
+                    self._finish_p2p_check(request_id, response)
+                    return
                 clock = self.clock
             target = self.p2p.find_transfer_target(size, clock)
             communication_ids = _unique_communication_ids(target["communication_ids"])
@@ -943,12 +995,14 @@ class Worker:
                     return
                 with self.ready_queue._lock:
                     before, current_version = self.ready_queue.get_queue_state()
-                    count = target["transfer_count"]
-                    if target_id is not None and current_version != version:
-                        count = min(count, max(0, (before - target["target_queue_size"]) // 2))
                     tasks = []
-                    if target_id is not None and count > 0:
-                        tasks = self.ready_queue.reserve_for_transfer(transfer_id, count)
+                    # 조회 중 일반 처리가 진행될 수 있으므로 예약 직전에 다시 검사한다.
+                    if before * 2 > 15 and target_id is not None:
+                        count = target["transfer_count"]
+                        if current_version != version:
+                            count = min(count, max(0, (before - target["target_queue_size"]) // 2))
+                        if count > 0:
+                            tasks = self.ready_queue.reserve_for_transfer(transfer_id, count)
                     state = self.ready_queue.get_queue_state()
                 if not tasks:
                     response = self.create_message(
@@ -966,6 +1020,7 @@ class Worker:
             started_at = self._request_p2p_time(
                 transfer_id, self.worker_id, target_id, "SEND", communication_ids,
             )
+            send_confirmed = True
             payload = []
             for task in tasks:
                 moved = task.for_p2p_transfer(started_at, started_at)
@@ -1031,13 +1086,15 @@ class Worker:
                 self.log("P2P_ACK", "INFO", f"id={transfer_id} {result['status']}: {result['reason']}")
                 self._finish_p2p_check(request_id, response)
         except Exception as error:
-            with self._state_lock:
-                self.log("P2P_TRANSFER", "WARN", f"id={transfer_id} 점검 중단, 예약 유지: {error}")
+            self._handle_p2p_exception(
+                request_id, transfer_id, target_id, send_confirmed, communication_ids, error,
+            )
 
     def _stop_p2p(self) -> None:
         """시각 대기를 깨운 후 P2P 서버와 점검 스레드를 정리한다."""
         self._closing.set()
         with self._state_lock:
+            self._active_p2p_check = None
             for pending in self._pending_times.values():
                 pending["event"].set()
             threads = list(self._p2p_threads)
@@ -1148,11 +1205,21 @@ class Worker:
             self.send_message(hello)
             self.log("HELLO", "INFO", "등록 요청 전송")
             while self.running:
-                self.handle_message(self.connection.recv())
-        except (ConnectionClosed, InvalidMessage, OSError, KeyError, TypeError, ValueError) as error:
+                message = self.connection.recv()
+                with self._state_lock:
+                    if self._p2p_error is not None:
+                        raise self._p2p_error
+                    self.handle_message(message)
+        except Exception as error:
+            with self._state_lock:
+                p2p_error = self._p2p_error
+            if p2p_error is not None:
+                self.log("STOP", "FAIL", f"P2P 점검으로 Worker 실행 중단: {p2p_error}")
+                raise RuntimeError(f"P2P 점검 실패: {p2p_error}") from p2p_error
             self.log("STOP", "FAIL", f"Worker 실행 중단: {error}")
             raise
         finally:
+            self._closing.set()
             self.running = False
             if self.sock is not None:
                 try:
