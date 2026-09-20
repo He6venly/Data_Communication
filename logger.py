@@ -12,14 +12,16 @@ EVENT_DEFINITIONS = {
     "PROC": ("LOCAL", "작업 처리 시작과 성공·실패"),
     "REASSIGN": ("LOCAL", "실패 작업 우선 큐 등록 및 재할당"),
     "STAT": ("LOCAL", "최종 통계"),
+    "COMM": ("Worker -> Master", "RECV 원문: 메시지 ID별 편도 비용 및 처리·대기시간 검증"),
     "HELLO": ("Worker -> Master", "Worker ID와 P2P 주소 등록"),
     "TASK": ("Master -> Worker", "작업 배정"),
     "TASK_ACK": ("Worker -> Master", "작업을 큐에 받았는지 확인"),
     "RESULT": ("Worker -> Master", "작업 성공 또는 실패 결과"),
     "QUEUE_STATUS": ("Worker -> Master", "현재 대기 작업 수"),
-    "P2P_TRANSFER": ("Worker -> Worker", "대기 작업 이전"),
+    "P2P_TRANSFER": ("Worker <-> Worker / Master <-> Worker", "작업 이전 및 P2P_CHECK·TIME_ACK·TRANSFER_CONFIRMED. id/source/target/key/attempt와 SEND·RECV 시각 기록"),
     "P2P_ACK": ("Worker -> Worker", "이전 작업 수신 확인"),
-    "STOP": ("Master -> Worker", "종료 요청"),
+    "P2P_CHECK": ("LOCAL / Master <-> Worker", "부하 점검, 이웃 큐·중단 이유, 직접 통신 ID 비용 보고"),
+    "STOP": ("Master -> Worker", "STOP 종료 요청, FINAL_STATS 최종 시간 통지(편도 비용 포함, 응답 없음)"),
     "STOP_ACK": ("Worker -> Master", "통계 저장과 종료 준비 완료"),
 }
 
