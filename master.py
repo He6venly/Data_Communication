@@ -18,6 +18,8 @@ P2P_TRANSFER: request_id(P2P_CHECK ID), transfer_id, source, target,
   대상 Worker는 TRANSFER_CONFIRMED 수신 후 처리 시작. P2P 수신은 재할당 집계 제외.
 P2P_COST: request_id(P2P_CHECK ID), communication_ids, transfer_id(예약 취소 시).
   ACK 미수신만으로 취소 금지. 수신 거절이 확정된 경우에만 취소 보고.
+P2P_FAILURE: request_id(P2P_CHECK ID), transfer_id, source, target, reason, communication_ids.
+  최초 UNKNOWN 이후 상태 조회 3회 모두 UNKNOWN이면 보고. 예약 유지, 전체 실패 종료.
 STOP_ACK: request_id(STOP ID), stats(WorkerStats.snapshot 결과), stats_at(STOP의 clock).
   Worker는 STOP.clock을 통계 기준 시간으로 저장. Master는 모든 종료 응답까지 집계.
 응답의 request_id는 원래 요청 ID. queue_version은 큐 변경마다 증가하는 정수.
@@ -283,6 +285,7 @@ class Master:
                 raise ValueError("이전 ID 재사용")
             self.transfer_times[transfer_id] = {
                 "source": source, "target": target, "started_at": self.clock,
+                "request_id": self.workers[source]["check_request"],
                 "arrived_at": None,
             }
         elif message["phase"] == "RECV":
@@ -345,6 +348,32 @@ class Master:
         worker["check_request"] = None
         del self.transfer_times[transfer_id]
 
+    def transfer_failure(self, worker_id, message):
+        worker = self.workers[worker_id]
+        request_id, transfer_id = message["request_id"], message["transfer_id"]
+        source, target, reason = message["source"], message["target"], message["reason"]
+        if (self.stopping or not isinstance(request_id, str) or not request_id.strip()
+                or request_id != worker["check_request"]):
+            raise ValueError("P2P_FAILURE 점검 요청 ID 또는 시점 오류")
+        if (type(source) is not int or type(target) is not int or source != worker_id
+                or source == target or target not in self.workers):
+            raise ValueError("P2P_FAILURE 송수신 Worker 불일치")
+        if not isinstance(transfer_id, str) or not transfer_id.strip():
+            raise ValueError("P2P_FAILURE 이전 ID 오류")
+        transfer = self.transfer_times.get(transfer_id)
+        if (transfer is None or transfer_id in self.transfers
+                or transfer["source"] != source or transfer["target"] != target
+                or transfer["request_id"] != request_id):
+            raise ValueError("P2P_FAILURE 진행 중 이전 정보 불일치")
+        if not isinstance(reason, str) or not reason.strip():
+            raise ValueError("P2P_FAILURE 실패 이유가 필요합니다")
+        self.peer_cost(message)
+        self.log("P2P_TRANSFER", "FAIL", f"P2P_FAILURE {json.dumps(message, ensure_ascii=False)}")
+        # 수신 여부가 불명확하므로 작업 소유권·예약 기록은 그대로 보존한다.
+        worker["check_request"] = None
+        self.stopping = True
+        raise RuntimeError(f"P2P_FAILURE id={transfer_id} Worker{source} -> Worker{target}: {reason}")
+
     def worker_statistics(self, worker_id, total_time):
         worker = self.workers[worker_id]
         count = worker["success"] + worker["fail"]
@@ -405,6 +434,8 @@ class Master:
             self.transfer_result(worker_id, message)
         elif kind == "P2P_TIME":
             self.transfer_time(worker_id, message)
+        elif kind == "P2P_FAILURE":
+            self.transfer_failure(worker_id, message)
         elif kind == "P2P_COST":
             if message["request_id"] != worker["check_request"]:
                 raise ValueError("P2P 점검 요청 ID 불일치")
