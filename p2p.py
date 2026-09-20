@@ -493,7 +493,12 @@ class P2PNode:
                     status = previous["status"]
                     reason = previous["reason"]
             else:
-                result = self.transfer_receiver(transfer_id, sender_id, tasks)
+                result = self.transfer_receiver(
+                    transfer_id,
+                    sender_id,
+                    tasks,
+                    request["message_id"],
+                )
                 if (
                     not isinstance(result, tuple)
                     or len(result) != 2
@@ -627,8 +632,10 @@ class P2PNode:
 #   def get_queue_state():
 #       return worker.ready_queue.get_queue_state()
 #
-#   def receive_tasks(transfer_id, source_id, tasks):
+#   def receive_tasks(transfer_id, source_id, tasks, transfer_message_id):
 #       # 여기에서 WorkerReadyQueue의 공간을 다시 확인하고 수신 작업을 예약한다.
+#       # transfer_message_id는 P2P_TIME(RECV)의 communication_ids에 넣는다.
+#       # Master 응답을 기다릴 때는 Queue 잠금을 잡고 있으면 안 된다.
 #       return True, f"Worker{source_id} 작업 {len(tasks)}개 수신"
 #
 #   p2p = P2PNode(
