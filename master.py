@@ -4,6 +4,8 @@
 HELLO: worker_id, peer_host, peer_port / READY: 초기화 완료
 TASK_ACK: key, attempt, accepted, queue_size, queue_version
   수락 후 TASK_CONFIRMED의 enqueued_at으로 WorkerTask 생성 시각 확정.
+  큐 추가 후 QUEUE_STATUS.request_id에 TASK_CONFIRMED.message_id 포함.
+  해당 보고 전까지 Master는 배정 작업의 큐 자리를 예약한 상태로 유지.
 PROCESS_START: key, attempt, processing_time, queue_size, queue_version
   PROCESS_ACK의 started_at으로 record_processing_start 호출 후 처리.
   finished_at은 처리 비용까지 누적한 시각. RESULT에서 같은 처리시간·대기시간 보고.
@@ -113,7 +115,7 @@ class Master:
             raise ValueError("P2P 포트 오류")
         self.workers[worker_id] = {
             "connection": connection, "host": message["peer_host"], "port": message["peer_port"],
-            "ready": False, "queue_size": 0, "queue_version": -1, "pending": None,
+            "ready": False, "queue_size": 0, "queue_version": -1, "pending": {},
             "success": 0, "fail": 0, "waiting": 0.0, "reassignments": 0,
             "p2p_events": 0, "stopped": False,
             "active": None, "next_check": None, "check_due": False,
@@ -153,15 +155,24 @@ class Master:
         worker = self.workers[worker_id]
         if version > worker["queue_version"]:
             worker["queue_size"], worker["queue_version"] = size, version
+        # 수락 ACK만으로 자리를 풀면 확정 전 작업이 큐 크기에서 빠진다.
+        request_id = message.get("request_id")
+        if request_id is not None:
+            for key, confirmed_id in list(worker["pending"].items()):
+                if confirmed_id == request_id:
+                    del worker["pending"][key]
+
+    def queue_load(self, worker_id):
+        worker = self.workers[worker_id]
+        return worker["queue_size"] + len(worker["pending"])
 
     def choose_worker(self, excluded):
         candidates = []
         for offset in range(1, 5):
             worker_id = (self.last_worker + offset - 1) % 4 + 1
-            worker = self.workers[worker_id]
-            if worker_id != excluded and worker["queue_size"] < 10 and worker["pending"] is None:
+            if worker_id != excluded and self.queue_load(worker_id) < 10:
                 candidates.append(worker_id)
-        return min(candidates, key=lambda wid: self.workers[wid]["queue_size"]) if candidates else None
+        return min(candidates, key=self.queue_load) if candidates else None
 
     def distribute(self):
         if len(self.workers) != 4 or not all(w["ready"] for w in self.workers.values()):
@@ -176,7 +187,7 @@ class Master:
             waiting.popleft()
             task["attempt"] += 1
             task["owner"], task["state"] = worker_id, "SENT"
-            self.workers[worker_id]["pending"] = key
+            self.workers[worker_id]["pending"][key] = None
             self.last_worker = worker_id
             task["waiting_time"] = 0.0
             request = self.send(worker_id, "TASK", key=key, value=task["value"], attempt=task["attempt"],
@@ -194,15 +205,16 @@ class Master:
             raise ValueError("accepted는 bool이어야 합니다")
         if message["request_id"] != task["request_id"]:
             raise ValueError("TASK_ACK 요청 ID 불일치")
-        self.workers[worker_id]["pending"] = None
         if message["accepted"]:
             task["state"] = "ACCEPTED"
             task["enqueued_at"] = self.clock
             if task["failed_worker"] is not None:
                 self.workers[worker_id]["reassignments"] += 1
-            self.send(worker_id, "TASK_CONFIRMED", request_id=message["message_id"],
+            confirmed = self.send(worker_id, "TASK_CONFIRMED", request_id=message["message_id"],
                       key=message["key"], attempt=task["attempt"], enqueued_at=task["enqueued_at"])
+            self.workers[worker_id]["pending"][message["key"]] = confirmed["message_id"]
         else:
+            self.workers[worker_id]["pending"].pop(message["key"], None)
             task["state"], task["owner"] = "WAITING", None
             self.retry_tasks.append(message["key"])
         self.log("TASK_ACK", "SUCCESS" if message["accepted"] else "FAIL",
