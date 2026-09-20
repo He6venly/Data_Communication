@@ -355,7 +355,7 @@ class P2PNode:
         """다른 Worker에 요청 하나를 보내고 응답 하나를 받는다."""
         peer = self._get_peer(target_id)
         request = self._make_message(kind, target_id, clock, **data)
-        message_ids = [request["message_id"]]
+        message_ids = []
 
         try:
             with socket.create_connection(
@@ -364,6 +364,8 @@ class P2PNode:
                 sock.settimeout(self.timeout)
                 connection = JsonLineConnection(sock)
                 connection.send(request)
+                # 연결만 시도한 경우는 제외하고 실제 전송을 마친 ID만 기록한다.
+                message_ids.append(request["message_id"])
                 response = connection.recv()
         except (OSError, ConnectionClosed, InvalidMessage):
             return None, message_ids
@@ -371,7 +373,15 @@ class P2PNode:
         self._validate_common(response, expected_sender=target_id)
         if response.get("request_id") != request["message_id"]:
             raise P2PError("응답의 request_id가 요청 message_id와 다릅니다")
-        message_ids.append(response["message_id"])
+
+        known_response_ids = response.get("known_response_ids", [])
+        if not isinstance(known_response_ids, list) or any(
+            not isinstance(item, str) or not item for item in known_response_ids
+        ):
+            raise P2PError("known_response_ids는 문자열 ID 목록이어야 합니다")
+        for message_id in known_response_ids + [response["message_id"]]:
+            if message_id not in message_ids:
+                message_ids.append(message_id)
 
         if response["type"] == "P2P_ERROR":
             raise P2PError(response.get("reason", "상대 Worker가 요청을 거부했습니다"))
@@ -429,6 +439,7 @@ class P2PNode:
             request = connection.recv()
             response = self._handle_request(request)
             connection.send(response)
+            self._record_sent_response(request, response)
         except (P2PError, KeyError, TypeError, ValueError) as error:
             response = self._error_response(request, str(error))
             if response is not None:
@@ -472,7 +483,10 @@ class P2PNode:
         with self.transfer_lock:
             previous = self.received_transfers.get(transfer_id)
             if previous is not None:
-                if previous["signature"] != signature:
+                if previous["source_id"] != sender_id:
+                    status = "REJECTED"
+                    reason = "transfer_id를 처음 보낸 Worker와 다릅니다"
+                elif previous["signature"] != signature:
                     status = "REJECTED"
                     reason = "같은 transfer_id에 다른 작업이 전달되었습니다"
                 else:
@@ -490,9 +504,11 @@ class P2PNode:
                 reason = str(reason)
                 status = "ACCEPTED" if accepted else "REJECTED"
                 self.received_transfers[transfer_id] = {
+                    "source_id": sender_id,
                     "signature": signature,
                     "status": status,
                     "reason": reason,
+                    "response_ids": [],
                 }
 
         return self._make_response(
@@ -511,9 +527,15 @@ class P2PNode:
             if previous is None:
                 status = "UNKNOWN"
                 reason = "해당 transfer_id를 받은 기록이 없습니다"
+                known_response_ids = []
+            elif previous["source_id"] != sender_id:
+                status = "REJECTED"
+                reason = "transfer_id를 처음 보낸 Worker와 다릅니다"
+                known_response_ids = []
             else:
                 status = previous["status"]
                 reason = previous["reason"]
+                known_response_ids = list(previous["response_ids"])
         return self._make_response(
             "P2P_STATUS_ACK",
             sender_id,
@@ -521,7 +543,22 @@ class P2PNode:
             transfer_id=transfer_id,
             status=status,
             reason=reason,
+            known_response_ids=known_response_ids,
         )
+
+    def _record_sent_response(self, request, response):
+        """실제로 전송한 이전 응답 ID를 상태 조회용으로 보관한다."""
+        if request.get("type") not in {"P2P_TRANSFER", "P2P_STATUS"}:
+            return
+        transfer_id = request.get("transfer_id")
+        sender_id = _read_worker_name(request.get("sender"), "sender")
+        with self.transfer_lock:
+            previous = self.received_transfers.get(transfer_id)
+            if previous is None or previous["source_id"] != sender_id:
+                return
+            response_id = response["message_id"]
+            if response_id not in previous["response_ids"]:
+                previous["response_ids"].append(response_id)
 
     def _make_response(self, kind, target_id, request, **data):
         return self._make_message(
@@ -618,7 +655,8 @@ class P2PNode:
 #       # ACK가 없다고 예약을 취소하지 않고 상대의 수신 상태를 확인한다.
 #       result = p2p.check_transfer(target_id, transfer_id, worker.clock)
 #   if result["status"] == "ACCEPTED":
-#       # Master의 시간 확인과 TRANSFER_CONFIRMED 이후 Queue 이전을 확정한다.
+#       # 송신 Queue에서 예약 작업을 제거하고 Master에 P2P_TRANSFER를 보고한다.
+#       # 수신 Worker는 Master의 TRANSFER_CONFIRMED 이후 작업 처리를 시작한다.
 #       pass
 #   elif result["status"] == "REJECTED":
 #       # 확실한 거절일 때만 기존 Queue의 예약을 해제한다.
