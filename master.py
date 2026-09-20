@@ -23,7 +23,7 @@ P2P_COST: request_id(P2P_CHECK ID), communication_ids, transfer_id(예약 취소
 P2P_FAILURE: request_id(P2P_CHECK ID), transfer_id, source, target, reason, communication_ids.
   최초 UNKNOWN 이후 상태 조회 3회 모두 UNKNOWN이면 보고. 예약 유지, 전체 실패 종료.
 STOP_ACK: request_id(STOP ID), stats(WorkerStats.snapshot 결과), stats_at(STOP의 clock).
-  Worker는 STOP.clock을 통계 기준 시간으로 저장. Master는 모든 종료 응답까지 집계.
+  STOP_ACK 검증 후 FINAL_STATS로 최종 시간을 공유. Worker는 그때 STAT 기록 후 종료.
 응답의 request_id는 원래 요청 ID. queue_version은 큐 변경마다 증가하는 정수.
 clock은 Master가 편도 비용을 반영한 시각. Worker는 별도 시계 증가 금지.
 같은 보고 재처리는 같은 ID 사용. 별도 실제 전송은 새 ID 사용.
@@ -74,12 +74,23 @@ class Master:
     def add_time(self, seconds):
         if type(seconds) not in (int, float) or not math.isfinite(seconds) or seconds < 0:
             raise ValueError("가상 시간은 유한한 0 이상 숫자여야 합니다")
-        self.clock += seconds
-        # 점검은 로컬 계산. 점검 자체를 통신으로 만들면 시간이 끝없이 증가한다.
-        for worker in self.workers.values():
-            while worker["next_check"] is not None and worker["next_check"] <= self.clock:
+        end = self.clock + seconds
+        # 전역 시계에서 Worker별 점검을 대행. 점검 계산 자체에는 통신 비용이 없다.
+        while not self.stopping:
+            due = [(w["next_check"], wid) for wid, w in self.workers.items()
+                   if w["next_check"] is not None and w["next_check"] <= end]
+            if not due:
+                break
+            self.clock, worker_id = min(due)
+            worker = self.workers[worker_id]
+            overloaded = worker["queue_size"] * 2 > 15
+            if overloaded and worker["check_request"] is None and not worker["check_due"]:
                 worker["check_due"] = True
-                worker["next_check"] += self.rng.randint(1, 3)
+                worker["check_at"] = self.clock
+            self.log("P2P_CHECK", "INFO", f"TICK worker={worker_id} queue={worker['queue_size']} "
+                     f"overloaded={overloaded} busy={worker['check_request'] is not None}")
+            worker["next_check"] += self.rng.randint(1, 3)
+        self.clock = end
 
     def log(self, event, status, message):
         if self.logger is not None:
@@ -93,7 +104,7 @@ class Master:
         self.workers[worker_id]["connection"].send(message)
         event = {"PEERS": "INIT", "TASK_CONFIRMED": "TASK_ACK", "PROCESS_ACK": "PROC",
                  "P2P_CHECK": "P2P_TRANSFER", "TIME_ACK": "P2P_TRANSFER",
-                 "TRANSFER_CONFIRMED": "P2P_TRANSFER"}.get(kind, kind)
+                 "TRANSFER_CONFIRMED": "P2P_TRANSFER", "FINAL_STATS": "STOP"}.get(kind, kind)
         self.log(event, "INFO", f"SEND {json.dumps(message, ensure_ascii=False)}")
         return message
 
@@ -118,7 +129,7 @@ class Master:
             "ready": False, "queue_size": 0, "queue_version": -1, "pending": {},
             "success": 0, "fail": 0, "waiting": 0.0, "reassignments": 0,
             "p2p_events": 0, "stopped": False,
-            "active": None, "next_check": None, "check_due": False,
+            "active": None, "next_check": None, "check_due": False, "check_at": None,
             "check_request": None, "stop_request": None, "stats_at": None,
         }
         self.log("HELLO", "SUCCESS", f"Worker{worker_id} 연결")
@@ -281,7 +292,9 @@ class Master:
                 continue
             worker["check_due"] = False
             if worker["queue_size"] * 2 > 15 and worker["check_request"] is None:
-                request = self.send(worker_id, "P2P_CHECK")
+                # send의 시간 증가 중 같은 Worker의 요청을 다시 예약하지 않는다.
+                worker["check_request"] = "SENDING"
+                request = self.send(worker_id, "P2P_CHECK", scheduled_at=worker["check_at"])
                 worker["check_request"] = request["message_id"]
 
     def transfer_time(self, worker_id, message):
@@ -319,6 +332,7 @@ class Master:
             raise ValueError("P2P 통신 ID 목록 오류")
         self.add_time(len(set(ids) - self.peer_messages))
         self.peer_messages.update(ids)
+        self.log("P2P_CHECK", "INFO", f"COST ids={json.dumps(ids)}")
 
     def transfer_result(self, worker_id, message):
         source, target = message["source"], message["target"]
@@ -354,9 +368,10 @@ class Master:
             task["waiting_time"] += times["started_at"] - task["enqueued_at"]
             task["enqueued_at"] = times["arrived_at"]
             task["owner"] = target
-        self.send(target, "TRANSFER_CONFIRMED", request_id=message["message_id"],
-                  transfer_id=transfer_id, tasks=items, transfer_started_at=times["started_at"],
-                  new_enqueued_at=times["arrived_at"])
+        for recipient in (source, target):
+            self.send(recipient, "TRANSFER_CONFIRMED", request_id=message["message_id"],
+                      transfer_id=transfer_id, tasks=items, transfer_started_at=times["started_at"],
+                      new_enqueued_at=times["arrived_at"])
         worker["check_request"] = None
         del self.transfer_times[transfer_id]
 
@@ -425,6 +440,7 @@ class Master:
             return
         self.add_time(1)
         kind = message["type"]
+        self.log("COMM", "INFO", f"RECV {json.dumps(message, ensure_ascii=False)}")
         if kind == "READY":
             worker["ready"] = True
             if all(w["ready"] for w in self.workers.values()):
@@ -459,7 +475,8 @@ class Master:
                 del self.transfer_times[transfer_id]
             self.peer_cost(message)
             worker["check_request"] = None
-            self.log("P2P_TRANSFER", "INFO", f"Worker{worker_id} 점검 완료, 이전 없음")
+            self.log("P2P_CHECK", "INFO", f"Worker{worker_id} request={message['request_id']} "
+                     f"reason={message.get('reason', 'UNSPECIFIED')} 이전 없음")
         elif kind == "STOP_ACK":
             self.stop_ack(worker_id, message)
         else:
@@ -520,7 +537,10 @@ class Master:
                         self.finish_if_ready()
                         if self.completed != self.original:
                             self.check_load()
-                self.finished_at = self.clock
+                # 남은 통신은 최종 통계 통지 4건뿐. ACK 없이 통지 후 연결을 종료한다.
+                self.finished_at = self.clock + len(self.workers)
+                for worker_id in self.workers:
+                    self.send(worker_id, "FINAL_STATS", total_execution_time=self.finished_at)
                 self.write_statistics()
                 self.log("STOP", "SUCCESS", "정상 종료")
         except Exception as error:

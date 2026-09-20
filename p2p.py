@@ -269,6 +269,9 @@ class P2PNode:
             "target_queue_version": None,
             "transfer_count": 0,
             "communication_ids": communication_ids,
+            "peer_queues": {state["worker_id"]: state["queue_size"] for state in states},
+            "unreachable": [peer_id for peer_id in peer_ids if peer_id != self.worker_id
+                            and peer_id not in {state["worker_id"] for state in states}],
         }
         if not states:
             return result

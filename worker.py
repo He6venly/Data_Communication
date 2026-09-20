@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import json
 import random
 import socket
 from collections import deque
@@ -195,17 +196,18 @@ class WorkerReadyQueue:
             return True
 
     def dequeue(self) -> WorkerTask | None:
-        """예약되지 않은 가장 앞 작업을 제거하여 반환한다.
+        """예약되지 않은 재시도 작업을 먼저, 같은 종류는 FIFO로 반환한다.
 
         예약된 작업은 Queue 크기에는 포함되지만 일반 처리 대상으로는
         꺼내지 않는다. 처리할 수 있는 작업이 없으면 None을 반환한다.
         """
         with self._lock:
-            for index, task in enumerate(self._queue):
-                if task.reserved_transfer_id is None:
-                    del self._queue[index]
-                    self._queue_version += 1
-                    return task
+            for retry_only in (True, False):
+                for index, task in enumerate(self._queue):
+                    if task.reserved_transfer_id is None and (task.failed_retry or not retry_only):
+                        del self._queue[index]
+                        self._queue_version += 1
+                        return task
 
             return None
 
@@ -515,6 +517,7 @@ class Worker:
         self.message_number = 0
         self.running = False
         self.ready = False
+        self.stopping = False
         self.rng = random.Random(seed)
         self._message_lock = RLock()
         self._responses: dict[str, dict | None] = {}
@@ -678,7 +681,7 @@ class Worker:
 
     def start_next_task(self) -> None:
         """처리 중인 작업이 없으면 PROCESS_START를 보내고 수신 반복으로 돌아간다."""
-        if self._p2p_failed or not self.running or not self.ready or self.current_task is not None:
+        if self.stopping or self._p2p_failed or not self.running or not self.ready or self.current_task is not None:
             return
         with self.ready_queue._lock:
             before, _ = self.ready_queue.get_queue_state()
@@ -847,6 +850,12 @@ class Worker:
                 for before, state in changes:
                     self._report_p2p_queue(before, state, arrived_at)
                 self.log("P2P_ACK", "INFO", f"id={transfer_id} 수신, Master 이전 확정 대기", arrived_at)
+                for task in incoming:
+                    self.log("P2P_TRANSFER", "INFO",
+                             f"id={transfer_id} source={source_id} target={self.worker_id} "
+                             f"key={task.key} attempt={task.attempt} phase=RECEIVED "
+                             f"started_at={started_at} arrived_at={arrived_at} "
+                             f"prior_wait={task.accumulated_waiting_time}", arrived_at)
             return True, f"작업 {len(incoming)}개 수신 완료"
         except Exception:
             with self._state_lock:
@@ -856,10 +865,32 @@ class Worker:
                 self.log("P2P_ACK", "WARN", f"id={transfer_id} 수신 확인 미완료, 상태 보존")
             raise
 
-    def _handle_transfer_confirmed(self, message: dict) -> dict:
+    def _handle_transfer_confirmed(self, message: dict) -> dict | None:
         """Master가 소유권을 확정한 이전만 예약 해제하고 한 번 집계한다."""
         transfer_id = message["transfer_id"]
         _validate_transfer_id(transfer_id)
+        outgoing = self._outgoing_transfers.get(transfer_id)
+        if outgoing is not None:
+            report = self._responses.get(outgoing["request_id"])
+            if (outgoing["status"] not in {"ACCEPTED", "CONFIRMED"} or report is None
+                    or report["message_id"] != message["request_id"]
+                    or report["tasks"] != message["tasks"]
+                    or self._read_time(message, "transfer_started_at") != outgoing["started_at"]):
+                raise ValueError("송신 이전 확정 내용이 기존 보고와 다릅니다.")
+            arrived_at = self._read_time(message, "new_enqueued_at")
+            if not outgoing["started_at"] <= arrived_at <= self.clock:
+                raise ValueError("송신 이전 확정 시각 오류")
+            if outgoing["status"] == "CONFIRMED":
+                return None
+            outgoing["status"] = "CONFIRMED"
+            self.log("P2P_ACK", "SUCCESS", f"id={transfer_id} ACCEPTED, Master 이전 확정")
+            for task in outgoing["tasks"]:
+                self.log("P2P_TRANSFER", "SUCCESS",
+                         f"id={transfer_id} source={self.worker_id} target={outgoing['target']} "
+                         f"key={task.key} attempt={task.attempt} phase=SENT "
+                         f"started_at={outgoing['started_at']} arrived_at={arrived_at} "
+                         f"enqueued_at={task.enqueued_at} prior_wait={task.accumulated_waiting_time}")
+            return None
         record = self._received_transfers.get(transfer_id)
         if record is None or record["status"] not in {"ACCEPTED", "CONFIRMED"}:
             raise ValueError("수신 완료되지 않은 이전의 TRANSFER_CONFIRMED입니다.")
@@ -923,6 +954,7 @@ class Worker:
             self._active_p2p_check = None
             if response["type"] == "P2P_FAILURE":
                 self._p2p_failed = True
+            self.log("P2P_CHECK", "INFO", f"REPORT {json.dumps(response, ensure_ascii=False)}")
             if not self._closing.is_set():
                 self.send_message(response)
                 if not self._p2p_failed:
@@ -980,9 +1012,11 @@ class Worker:
                 if self._closing.is_set():
                     return
                 size, version = self.ready_queue.get_queue_state()
+                self.log("P2P_CHECK", "INFO", f"request={request_id} start_queue={size}")
                 if size * 2 <= 15:
                     response = self.create_message(
                         "P2P_COST", request_id=request_id, communication_ids=[],
+                        reason="BELOW_THRESHOLD",
                     )
                     self._finish_p2p_check(request_id, response)
                     return
@@ -990,6 +1024,7 @@ class Worker:
             target = self.p2p.find_transfer_target(size, clock)
             communication_ids = _unique_communication_ids(target["communication_ids"])
             target_id = target["target_worker_id"]
+            self.log("P2P_CHECK", "INFO", f"request={request_id} peers={json.dumps(target, ensure_ascii=False)}")
             with self._state_lock:
                 if self._closing.is_set():
                     return
@@ -1005,9 +1040,15 @@ class Worker:
                             tasks = self.ready_queue.reserve_for_transfer(transfer_id, count)
                     state = self.ready_queue.get_queue_state()
                 if not tasks:
+                    reason = ("BELOW_THRESHOLD_AFTER_QUERY" if before * 2 <= 15
+                              else "NO_PEER" if not target["peer_queues"]
+                              else "NO_QUEUE_DIFFERENCE" if target_id is None
+                              else "NO_RESERVABLE_TASK")
                     response = self.create_message(
                         "P2P_COST", request_id=request_id, communication_ids=communication_ids,
+                        reason=reason,
                     )
+                    self.log("P2P_CHECK", "INFO", f"request={request_id} final_queue={before} reason={reason}")
                     self._finish_p2p_check(request_id, response)
                     return
                 record = {
@@ -1021,6 +1062,8 @@ class Worker:
                 transfer_id, self.worker_id, target_id, "SEND", communication_ids,
             )
             send_confirmed = True
+            with self._state_lock:
+                record["started_at"] = started_at
             payload = []
             for task in tasks:
                 moved = task.for_p2p_transfer(started_at, started_at)
@@ -1082,8 +1125,10 @@ class Worker:
                     response = self.create_message(
                         "P2P_COST", request_id=request_id, transfer_id=transfer_id,
                         communication_ids=communication_ids,
+                        reason="RECEIVER_REJECTED",
                     )
-                self.log("P2P_ACK", "INFO", f"id={transfer_id} {result['status']}: {result['reason']}")
+                if result["status"] != "ACCEPTED":
+                    self.log("P2P_ACK", "INFO", f"id={transfer_id} {result['status']}: {result['reason']}")
                 self._finish_p2p_check(request_id, response)
         except Exception as error:
             self._handle_p2p_exception(
@@ -1111,8 +1156,8 @@ class Worker:
             raise ValueError("작업 완료 시각이 종료 요청 시각보다 늦습니다.")
         self.stats.set_total_execution_time(total_time)
         stats = self.stats.snapshot()
+        self.stopping = True
         self.log("STOP", "INFO", f"종료 요청 work_completed_at={completed_at}")
-        self.log("STAT", "INFO", f"stats_at={self.clock} {stats}")
         return self.create_message(
             "STOP_ACK", request_id=message["message_id"], stats=stats, stats_at=self.clock,
         )
@@ -1161,6 +1206,17 @@ class Worker:
             response = self._handle_transfer_confirmed(message)
         elif kind == "STOP":
             response = self._handle_stop(message)
+        elif kind == "FINAL_STATS":
+            if not self.stopping:
+                raise ValueError("STOP 전에 최종 통계를 받았습니다.")
+            total_time = self._read_time(message, "total_execution_time")
+            if total_time < self.clock:
+                raise ValueError("전체 수행시간이 최종 통지 시각보다 빠릅니다.")
+            self.stats.set_total_execution_time(total_time)
+            self.clock = total_time
+            self.log("STAT", "INFO", f"stats_at={total_time} {self.stats.snapshot()}")
+            self.running = False
+            response = None
         else:
             self.log("INIT", "WARN", f"아직 지원하지 않는 메시지: {kind}")
             response = None
@@ -1176,8 +1232,7 @@ class Worker:
             self.process_request_id = None
             self.processing_time = None
         elif kind == "STOP":
-            self.running = False
-            self.log("STOP_ACK", "SUCCESS", "최종 통계 응답 전송 완료")
+            self.log("STOP_ACK", "SUCCESS", "통계 응답 전송 완료, 최종 시간 대기")
 
         # 점검 스레드가 예약 대상을 고를 수 있도록 이 요청에서는 다음 작업을 꺼내지 않는다.
         if kind != "P2P_CHECK" and not self._p2p_failed:
