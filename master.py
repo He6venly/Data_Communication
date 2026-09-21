@@ -22,7 +22,7 @@ P2P_COST: request_id(P2P_CHECK ID), communication_ids, transfer_id(예약 취소
   ACK 미수신만으로 취소 금지. 수신 거절이 확정된 경우에만 취소 보고.
 P2P_FAILURE: request_id(P2P_CHECK ID), transfer_id, source, target, reason, communication_ids.
   최초 UNKNOWN 이후 상태 조회 3회 모두 UNKNOWN이면 보고. 예약 유지, 전체 실패 종료.
-STOP_ACK: request_id(STOP ID), stats(WorkerStats.snapshot 결과), stats_at(STOP의 clock).
+STOP_ACK: request_id(STOP ID), stats(Worker.get_statistics 결과), stats_at(STOP의 clock).
   STOP_ACK 검증 후 FINAL_STATS로 최종 시간을 공유. Worker는 그때 STAT 기록 후 종료.
 응답의 request_id는 원래 요청 ID. queue_version은 큐 변경마다 증가하는 정수.
 clock은 Master가 편도 비용을 반영한 시각. Worker는 별도 시계 증가 금지.

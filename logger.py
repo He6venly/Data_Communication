@@ -54,7 +54,6 @@ class NodeLogger:
         self.log_dir = Path(log_dir)
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self.lock = threading.Lock()
-        self.closed = False
 
         log_path = self.log_dir / f"{node}.txt"
         self.file = log_path.open("a", encoding="utf-8", buffering=1)
@@ -81,54 +80,21 @@ class NodeLogger:
 
         # 여러 스레드의 로그가 서로 섞이지 않게 한 번에 기록한다.
         with self.lock:
-            if self.closed:
+            if self.file.closed:
                 raise ValueError("이미 종료된 로그입니다")
 
             self.file.write(line)
             self.file.flush()
 
     def close(self):
-        """남은 내용을 저장하고 로그 파일을 닫는다."""
         with self.lock:
-            if self.closed:
+            if self.file.closed:
                 return
 
             self.file.flush()
             self.file.close()
-            self.closed = True
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        self.close()
 
     @staticmethod
     def _one_line(value: str) -> str:
         """줄바꿈 문자를 화면에 보이는 문자로 바꾼다."""
         return value.replace("\r", "\\r").replace("\n", "\\n")
-
-
-# 실행 시작 시 한 번만 호출하여 이전 로그와 이벤트 명세를 초기화한다.
-#   initialize_log_files("logs")
-#
-# Master 사용 예제
-#   with NodeLogger("Master", "logs") as logger:
-#       logger.log(0, "HELLO", "SUCCESS", "Worker1 접속 완료")
-#       logger.log(1, "TASK", "INFO", "Key=0A1F, Worker=1")
-#
-# logs/Master.txt 출력값
-#   [0] Master | HELLO | SUCCESS | Worker1 접속 완료
-#   [1] Master | TASK | INFO | Key=0A1F, Worker=1
-#
-# logs/AllDefinedLogs.txt 출력값 일부
-#   HELLO | Worker -> Master | Worker ID와 P2P 주소 등록
-#   TASK | Master -> Worker | 작업 배정
-#
-# Worker 사용 예제
-#   logger = NodeLogger("Worker1", "logs")
-#   logger.log(2, "QUEUE_STATUS", "WARN", "대기 작업 수=8")
-#   logger.close()
-#
-# logs/Worker1.txt 출력값
-#   [2] Worker1 | QUEUE_STATUS | WARN | 대기 작업 수=8

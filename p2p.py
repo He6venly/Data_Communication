@@ -252,6 +252,7 @@ class P2PNode:
 
         communication_ids = []
         states = []
+        unreachable = []
         with self.peer_lock:
             peer_ids = sorted(self.peers)
 
@@ -262,6 +263,8 @@ class P2PNode:
             communication_ids.extend(message_ids)
             if state is not None:
                 states.append(state)
+            else:
+                unreachable.append(peer_id)
 
         result = {
             "target_worker_id": None,
@@ -270,8 +273,7 @@ class P2PNode:
             "transfer_count": 0,
             "communication_ids": communication_ids,
             "peer_queues": {state["worker_id"]: state["queue_size"] for state in states},
-            "unreachable": [peer_id for peer_id in peer_ids if peer_id != self.worker_id
-                            and peer_id not in {state["worker_id"] for state in states}],
+            "unreachable": unreachable,
         }
         if not states:
             return result
@@ -303,19 +305,9 @@ class P2PNode:
             transfer_id=transfer_id,
             tasks=cleaned_tasks,
         )
-        if response is None:
-            return {
-                "status": "UNKNOWN",
-                "reason": "P2P_ACK를 받지 못했습니다",
-                "communication_ids": message_ids,
-            }
-
-        self._check_response(response, "P2P_ACK", transfer_id)
-        return {
-            "status": response["status"],
-            "reason": response["reason"],
-            "communication_ids": message_ids,
-        }
+        return self._transfer_result(
+            response, message_ids, "P2P_ACK", transfer_id, "P2P_ACK를 받지 못했습니다",
+        )
 
     def check_transfer(self, target_id, transfer_id, clock):
         """대상 Worker가 이전 요청을 받았는지 다시 확인한다."""
@@ -326,14 +318,20 @@ class P2PNode:
             _read_clock(clock),
             transfer_id=transfer_id,
         )
+        return self._transfer_result(
+            response, message_ids, "P2P_STATUS_ACK", transfer_id, "이전 상태 응답을 받지 못했습니다",
+        )
+
+    def _transfer_result(self, response, message_ids, expected_type, transfer_id, reason):
+        """응답이 없으면 UNKNOWN, 있으면 검증한 이전 결과 반환."""
         if response is None:
             return {
                 "status": "UNKNOWN",
-                "reason": "이전 상태 응답을 받지 못했습니다",
+                "reason": reason,
                 "communication_ids": message_ids,
             }
 
-        self._check_response(response, "P2P_STATUS_ACK", transfer_id)
+        self._check_response(response, expected_type, transfer_id)
         return {
             "status": response["status"],
             "reason": response["reason"],
@@ -628,46 +626,3 @@ class P2PNode:
                 raise P2PError("P2P 응답 상태가 올바르지 않습니다")
             if not isinstance(response.get("reason"), str):
                 raise P2PError("P2P 응답 reason은 문자열이어야 합니다")
-
-
-# Worker 연결 예제
-#
-#   def get_queue_state():
-#       return worker.ready_queue.get_queue_state()
-#
-#   def receive_tasks(transfer_id, source_id, tasks, transfer_message_id):
-#       # 여기에서 WorkerReadyQueue의 공간을 다시 확인하고 수신 작업을 예약한다.
-#       # transfer_message_id는 P2P_TIME(RECV)의 communication_ids에 넣는다.
-#       # Master 응답을 기다릴 때는 Queue 잠금을 잡고 있으면 안 된다.
-#       return True, f"Worker{source_id} 작업 {len(tasks)}개 수신"
-#
-#   p2p = P2PNode(
-#       worker.worker_id,
-#       worker.peer_host,
-#       worker.peer_port,
-#       get_queue_state,
-#       receive_tasks,
-#   )
-#   p2p.set_peers(worker.peers)
-#   p2p.start()
-#
-# P2P_CHECK 처리 예제
-#
-#   target = p2p.find_transfer_target(worker.ready_queue.get_queue_size(), worker.clock)
-#   if target["transfer_count"] == 0:
-#       # communication_ids를 P2P_COST에 넣어 Master에 보고한다.
-#       pass
-#
-# 작업 이전 예제
-#
-#   result = p2p.send_transfer(target_id, transfer_id, tasks, worker.clock)
-#   if result["status"] == "UNKNOWN":
-#       # ACK가 없다고 예약을 취소하지 않고 상대의 수신 상태를 확인한다.
-#       result = p2p.check_transfer(target_id, transfer_id, worker.clock)
-#   if result["status"] == "ACCEPTED":
-#       # 송신 Queue에서 예약 작업을 제거하고 Master에 P2P_TRANSFER를 보고한다.
-#       # 수신 Worker는 Master의 TRANSFER_CONFIRMED 이후 작업 처리를 시작한다.
-#       pass
-#   elif result["status"] == "REJECTED":
-#       # 확실한 거절일 때만 기존 Queue의 예약을 해제한다.
-#       pass
