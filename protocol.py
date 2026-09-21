@@ -43,7 +43,7 @@ class JsonLineConnection:
             self.sock.sendall(data)
 
     def recv(self) -> dict:
-        """다음 JSON 메시지 한 개를 받아 dict로 반환한다."""
+        """다음 JSON 메시지 반환. 소켓마다 수신 스레드 하나만 사용."""
         while not self.message_queue:
             if self.closed:
                 raise ConnectionClosed("상대가 연결을 종료했습니다")
@@ -93,26 +93,3 @@ class JsonLineConnection:
             raise InvalidMessage("JSON 메시지는 객체여야 합니다")
 
         return message
-
-
-# 사용 예제
-#
-# Master에서 전송:
-#   connection = JsonLineConnection(worker_socket)
-#   connection.send({"type": "TASK", "key": "0A1F", "value": 42})
-#
-# Worker에서 수신:
-#   connection = JsonLineConnection(master_socket)
-#   try:
-#       message = connection.recv()
-#       print(message)
-#   except ConnectionClosed:
-#       print("Master와 연결이 종료되었습니다")
-#   except InvalidMessage as error:
-#       print(f"잘못된 메시지: {error}")
-#
-# 출력값:
-#   {'type': 'TASK', 'key': '0A1F', 'value': 42}
-#
-# 주의: send()는 여러 스레드에서 호출할 수 있지만 recv()는 소켓마다
-# 하나의 수신 스레드에서만 호출해야 한다.
