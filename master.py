@@ -72,8 +72,6 @@ class Master:
         self.logger = None
 
     def add_time(self, seconds):
-        if type(seconds) not in (int, float) or not math.isfinite(seconds) or seconds < 0:
-            raise ValueError("가상 시간은 유한한 0 이상 숫자여야 합니다")
         end = self.clock + seconds
         # 전역 시계에서 Worker별 점검을 대행. 점검 계산 자체에는 통신 비용이 없다.
         while not self.stopping:
@@ -188,6 +186,9 @@ class Master:
     def distribute(self):
         if len(self.workers) != 4 or not all(w["ready"] for w in self.workers.values()):
             return
+        # P2P 수신 여유를 새 배정이 먼저 채우지 않도록 기다린다.
+        if any(w["check_request"] is not None for w in self.workers.values()):
+            return
         while self.retry_tasks or self.new_tasks:
             waiting = self.retry_tasks if self.retry_tasks else self.new_tasks
             key = waiting[0]
@@ -212,8 +213,6 @@ class Master:
         if (task["owner"] != worker_id or task["attempt"] != message["attempt"]
                 or task["state"] != "SENT"):
             return
-        if type(message["accepted"]) is not bool:
-            raise ValueError("accepted는 bool이어야 합니다")
         if message["request_id"] != task["request_id"]:
             raise ValueError("TASK_ACK 요청 ID 불일치")
         if message["accepted"]:
@@ -260,14 +259,9 @@ class Master:
             return
         if task["owner"] != worker_id:
             raise ValueError("결과를 보낸 Worker가 현재 작업 소유자가 아닙니다")
-        if task["state"] != "PROCESSING":
-            raise ValueError("RESULT 전에 PROCESS_START가 필요합니다")
         if message["value"] != task["value"] or message["status"] not in {"SUCCESS", "FAIL"}:
             raise ValueError("결과 값 또는 상태 오류")
         duration, wait = message["processing_time"], message["waiting_time"]
-        if (type(duration) not in (int, float) or not 1 <= duration <= 3
-                or type(wait) not in (int, float) or not math.isfinite(wait) or wait < 0):
-            raise ValueError("처리시간 또는 대기시간 오류")
         if duration != task["processing_time"] or not math.isclose(wait, task["waiting_time"], abs_tol=1e-9):
             raise ValueError("Master와 Worker 처리시간 또는 대기시간 불일치")
         worker = self.workers[worker_id]
@@ -286,6 +280,8 @@ class Master:
 
     def check_load(self):
         if self.stopping or len(self.workers) != 4 or not all(w["ready"] for w in self.workers.values()):
+            return
+        if any(w["check_request"] is not None for w in self.workers.values()):
             return
         for worker_id, worker in self.workers.items():
             if not worker["check_due"]:
@@ -356,8 +352,6 @@ class Master:
             task = self.tasks[item["key"]]
             if task["owner"] != source or task["attempt"] != item["attempt"] or task["state"] != "ACCEPTED":
                 raise ValueError("P2P 이전 대상 불일치")
-            if task["enqueued_at"] > times["started_at"]:
-                raise ValueError("큐 진입보다 이전 시작이 빠릅니다")
         self.peer_cost(message, minimum=2)
         self.transfers[transfer_id] = signature
         self.workers[source]["p2p_events"] += 1
@@ -385,15 +379,11 @@ class Master:
         if (type(source) is not int or type(target) is not int or source != worker_id
                 or source == target or target not in self.workers):
             raise ValueError("P2P_FAILURE 송수신 Worker 불일치")
-        if not isinstance(transfer_id, str) or not transfer_id.strip():
-            raise ValueError("P2P_FAILURE 이전 ID 오류")
         transfer = self.transfer_times.get(transfer_id)
         if (transfer is None or transfer_id in self.transfers
                 or transfer["source"] != source or transfer["target"] != target
                 or transfer["request_id"] != request_id):
             raise ValueError("P2P_FAILURE 진행 중 이전 정보 불일치")
-        if not isinstance(reason, str) or not reason.strip():
-            raise ValueError("P2P_FAILURE 실패 이유가 필요합니다")
         self.peer_cost(message)
         self.log("P2P_TRANSFER", "FAIL", f"P2P_FAILURE {json.dumps(message, ensure_ascii=False)}")
         # 수신 여부가 불명확하므로 작업 소유권·예약 기록은 그대로 보존한다.

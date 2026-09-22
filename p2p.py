@@ -128,19 +128,6 @@ class P2PNode:
         transfer_receiver,
         timeout=5,
     ):
-        if type(worker_id) is not int or worker_id not in range(1, 5):
-            raise ValueError("worker_id는 1~4의 정수여야 합니다")
-        if not isinstance(host, str) or not host.strip():
-            raise ValueError("host는 비어 있지 않은 문자열이어야 합니다")
-        if type(port) is not int or not 0 <= port <= 65535:
-            raise ValueError("port는 0~65535의 정수여야 합니다")
-        if not callable(queue_state_provider) or not callable(transfer_receiver):
-            raise TypeError("queue_state_provider와 transfer_receiver는 함수여야 합니다")
-        if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
-            raise TypeError("timeout은 숫자여야 합니다")
-        if not math.isfinite(timeout) or timeout <= 0:
-            raise ValueError("timeout은 유한한 양수여야 합니다")
-
         self.worker_id = worker_id
         self.host = host
         self.port = port
@@ -246,9 +233,6 @@ class P2PNode:
 
     def find_transfer_target(self, source_queue_size, clock):
         """다른 Worker의 큐를 조회해 이전 대상과 작업 수를 정한다."""
-        if type(source_queue_size) is not int or not 0 <= source_queue_size <= 10:
-            raise ValueError("source_queue_size는 0~10의 정수여야 합니다")
-        clock = _read_clock(clock)
 
         communication_ids = []
         states = []
@@ -296,14 +280,12 @@ class P2PNode:
 
     def send_transfer(self, target_id, transfer_id, tasks, clock):
         """작업을 대상 Worker에 보내고 수신 결과를 반환한다."""
-        transfer_id = _read_transfer_id(transfer_id)
-        cleaned_tasks = clean_tasks(tasks)
         response, message_ids = self._request(
             target_id,
             "P2P_TRANSFER",
-            _read_clock(clock),
+            clock,
             transfer_id=transfer_id,
-            tasks=cleaned_tasks,
+            tasks=tasks,
         )
         return self._transfer_result(
             response, message_ids, "P2P_ACK", transfer_id, "P2P_ACK를 받지 못했습니다",
@@ -311,11 +293,10 @@ class P2PNode:
 
     def check_transfer(self, target_id, transfer_id, clock):
         """대상 Worker가 이전 요청을 받았는지 다시 확인한다."""
-        transfer_id = _read_transfer_id(transfer_id)
         response, message_ids = self._request(
             target_id,
             "P2P_STATUS",
-            _read_clock(clock),
+            clock,
             transfer_id=transfer_id,
         )
         return self._transfer_result(
@@ -389,15 +370,8 @@ class P2PNode:
         return response, message_ids
 
     def _get_peer(self, target_id):
-        if type(target_id) is not int or target_id not in range(1, 5):
-            raise ValueError("target_id는 1~4의 정수여야 합니다")
-        if target_id == self.worker_id:
-            raise ValueError("자기 자신에게 P2P 요청을 보낼 수 없습니다")
         with self.peer_lock:
-            peer = self.peers.get(target_id)
-            if peer is None:
-                raise ValueError(f"Worker{target_id} 주소가 등록되지 않았습니다")
-            return peer.copy()
+            return self.peers[target_id].copy()
 
     def _make_message(self, kind, target_id, clock, **data):
         with self.message_lock:
@@ -462,7 +436,6 @@ class P2PNode:
         kind = request["type"]
         if kind == "P2P_QUEUE_QUERY":
             queue_size, queue_version = self.queue_state_provider()
-            queue_size, queue_version = _read_queue_state(queue_size, queue_version)
             return self._make_response(
                 "P2P_QUEUE_ACK",
                 sender_id,
@@ -494,28 +467,18 @@ class P2PNode:
                     status = previous["status"]
                     reason = previous["reason"]
             else:
-                result = self.transfer_receiver(
-                    transfer_id,
-                    sender_id,
-                    tasks,
-                    request["message_id"],
-                )
-                if (
-                    not isinstance(result, tuple)
-                    or len(result) != 2
-                    or type(result[0]) is not bool
-                ):
-                    raise P2PError("transfer_receiver는 (bool, reason)을 반환해야 합니다")
-                accepted, reason = result
-                reason = str(reason)
-                status = "ACCEPTED" if accepted else "REJECTED"
-                self.received_transfers[transfer_id] = {
-                    "source_id": sender_id,
-                    "signature": signature,
-                    "status": status,
-                    "reason": reason,
+                # 콜백 실패 시 UNKNOWN을 남겨 같은 작업을 다시 큐에 넣지 않는다.
+                previous = {
+                    "source_id": sender_id, "signature": signature,
+                    "status": "UNKNOWN", "reason": "수신 확인 미완료",
                     "response_ids": [],
                 }
+                self.received_transfers[transfer_id] = previous
+                accepted, reason = self.transfer_receiver(
+                    transfer_id, sender_id, tasks, request["message_id"],
+                )
+                status = "ACCEPTED" if accepted else "REJECTED"
+                previous.update(status=status, reason=reason)
 
         return self._make_response(
             "P2P_ACK",
@@ -595,8 +558,6 @@ class P2PNode:
             return None
 
     def _validate_common(self, message, expected_sender=None):
-        if not isinstance(message, dict):
-            raise P2PError("P2P 메시지는 dict여야 합니다")
         kind = message.get("type")
         if not isinstance(kind, str) or not kind.strip():
             raise P2PError("메시지 type이 필요합니다")
@@ -624,5 +585,3 @@ class P2PNode:
         if expected_type in {"P2P_ACK", "P2P_STATUS_ACK"}:
             if response.get("status") not in TRANSFER_STATUSES:
                 raise P2PError("P2P 응답 상태가 올바르지 않습니다")
-            if not isinstance(response.get("reason"), str):
-                raise P2PError("P2P 응답 reason은 문자열이어야 합니다")
