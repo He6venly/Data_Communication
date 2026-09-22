@@ -18,8 +18,6 @@ class JsonLineConnection:
     """소켓 하나의 JSON 송수신을 관리한다."""
 
     def __init__(self, sock: socket.socket):
-        if not isinstance(sock, socket.socket):
-            raise TypeError("sock은 socket.socket 객체여야 합니다")
 
         self.sock = sock
         self.recv_buffer = bytearray()
@@ -29,8 +27,6 @@ class JsonLineConnection:
 
     def send(self, message: dict):
         """dict를 UTF-8 JSON으로 바꾸고 줄바꿈을 붙여 전송한다."""
-        if not isinstance(message, dict):
-            raise TypeError("message는 dict 객체여야 합니다")
 
         data = json.dumps(
             message,
