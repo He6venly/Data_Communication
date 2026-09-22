@@ -87,8 +87,7 @@
       master.py       worker.py       run_workers.py
       p2p.py          protocol.py     logger.py
 
-  (2) 로컬 PC에서 소스 폴더를 열고 PowerShell 실행.
-      경로는 실제 압축을 해제한 위치로 변경.
+  (2) 로컬 PC에서 소스 파일 6개가 있는 폴더를 열고 PowerShell 실행.
 
       Python 3.10 이상과 소스 파일 6개가 표시되는지 확인.
       python 명령이 없고 py --version이 정상 동작하는 경우,
@@ -177,7 +176,7 @@
   - --peer-host      : Worker끼리 연결할 주소, 같은 PC이므로 127.0.0.1
   - --peer-base-port : 기준값 6000에 Worker ID를 더해 6001~6004 사용
   - --seed           : Worker별 난수 기준값. 10에 각 Worker ID를 더해 사용
-  - --timeout        : 실제 통신 대기 제한시간, 60초
+  - --timeout        : Master 통신 대기 제한시간 60초. P2P 통신은 최대 5초.
   - --log-dir        : 현재 소스 폴더 기준 Worker 로그 저장 경로
 
   한 번 실행하면 Worker 4개가 각각 독립 Thread로 시작.
@@ -299,6 +298,7 @@
 
   예약 직전 송신 큐를 재확인해 이전 개수를 조정하며,
   큐 뒤쪽에서 예약 가능한 작업만 선택. 수신 측에서도 공간 재확인.
+  계산한 개수는 예약 가능한 작업 수와 수신 측 실제 여유에 따라 줄거나 거절될 수 있음.
 
 
   5.2 이전 순서
