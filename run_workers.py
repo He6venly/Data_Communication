@@ -7,7 +7,7 @@ import socket
 import sys
 import threading
 
-from logger import initialize_log_files
+from logger import initialize_log_files, new_log_dir
 from worker import Worker
 
 
@@ -20,11 +20,12 @@ def parse_args():
     parser.add_argument("--master-host", default="52.79.236.152", help="Master 주소")
     parser.add_argument("--master-port", type=int, default=5000, help="Master 포트")
     parser.add_argument("--peer-host", default="127.0.0.1", help="P2P 등록 주소")
-    parser.add_argument("--peer-base-port", type=int, default=6000, help="P2P 기준 포트")
-    parser.add_argument("--log-dir", default="logs/workers", help="로그 폴더")
+    parser.add_argument("--peer-base-port", type=int, default=6665, help="P2P 기준 포트")
+    parser.add_argument("--log-dir", default=None, help="생략 시 실행별 새 로그 경로")
     parser.add_argument("--timeout", type=float, default=60, help="소켓 제한시간(초)")
     parser.add_argument("--seed", type=int, default=None, help="Worker 난수 시드 기준값")
     args = parser.parse_args()
+    args.log_dir = args.log_dir or new_log_dir("workers")
 
     if not args.master_host.strip() or not args.peer_host.strip():
         parser.error("Master와 P2P 주소는 비어 있을 수 없습니다.")

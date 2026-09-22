@@ -1,7 +1,14 @@
 """Master와 Worker의 실행 로그를 파일에 기록하는 모듈."""
 
 import threading
+from datetime import datetime
 from pathlib import Path
+from uuid import uuid4
+
+
+def new_log_dir(role):
+    """실행마다 새 경로를 만들어 이전 결과를 보존한다."""
+    return f"logs/{datetime.now():%Y%m%d-%H%M%S}-{uuid4().hex[:8]}/{role}"
 
 
 VALID_NODES = {"Master", "Worker1", "Worker2", "Worker3", "Worker4"}
@@ -9,6 +16,7 @@ VALID_STATUS = {"INFO", "SUCCESS", "FAIL", "WARN"}
 EVENT_DEFINITIONS = {
     # 통신 메시지 외에 노드 내부 이벤트와 최종 통계도 기록.
     "INIT": ("LOCAL", "노드 초기화"),
+    "DISPATCH": ("LOCAL", "배정 직전 Worker별 부하, 제외 Worker, 직전 배정 Worker와 선택 결과. 최소 부하·동률 순환 근거이며 가상 통신비 없음"),
     "PROC": ("LOCAL", "작업 처리 시작과 성공·실패"),
     "REASSIGN": ("LOCAL", "실패 작업 우선 큐 등록 및 재할당"),
     "STAT": ("LOCAL", "최종 통계"),
@@ -31,7 +39,9 @@ def initialize_log_files(log_dir="."):
     log_dir = Path(log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
 
-    # 이전 실행의 노드별 로그를 모두 비운다.
+    # 기존 실행 결과가 있는 경로는 거부해 제출 로그 덮어쓰기를 방지한다.
+    if any((log_dir / f"{node}.txt").exists() for node in VALID_NODES):
+        raise FileExistsError(f"기존 로그가 있습니다. 새 --log-dir 경로를 지정하세요: {log_dir}")
     for node in VALID_NODES:
         log_path = log_dir / f"{node}.txt"
         log_path.write_text("", encoding="utf-8")

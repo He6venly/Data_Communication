@@ -38,7 +38,7 @@ import socket
 import threading
 from collections import deque
 
-from logger import NodeLogger, initialize_log_files
+from logger import NodeLogger, initialize_log_files, new_log_dir
 from protocol import ConnectionClosed, InvalidMessage, JsonLineConnection
 
 
@@ -196,6 +196,11 @@ class Master:
             worker_id = self.choose_worker(task["failed_worker"])
             if worker_id is None:
                 return
+            self.log("DISPATCH", "INFO", json.dumps({
+                "key": key, "loads": {wid: self.queue_load(wid) for wid in self.workers},
+                "excluded": task["failed_worker"], "previous_worker": self.last_worker,
+                "selected": worker_id, "policy": "min_load_then_round_robin",
+            }, ensure_ascii=False))
             waiting.popleft()
             task["attempt"] += 1
             task["owner"], task["state"] = worker_id, "SENT"
@@ -555,6 +560,8 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=5000)
     parser.add_argument("--count", type=int, default=5000)
     parser.add_argument("--seed", type=int)
-    parser.add_argument("--log-dir", default="logs/master")
+    parser.add_argument("--log-dir", default=None, help="생략 시 실행별 새 로그 경로")
     args = parser.parse_args()
+    args.log_dir = args.log_dir or new_log_dir("master")
+    print(f"Master: {args.host}:{args.port} | 로그 폴더: {args.log_dir}", flush=True)
     Master(args.count, args.seed).run(args.host, args.port, args.log_dir)
