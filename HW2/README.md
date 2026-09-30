@@ -46,6 +46,7 @@ Request·Response는 Protocol 내부 작은 클래스로 둡니다.
 통합할 때 조원 3과 Queue 입력·송신 완료 기준을, 조원 2와 예약 결과·종료 신호를 확인합니다.
 
 완료 확인:
+
 - 같은 좌석의 이중예약 없음.
 - MULTI는 2~4석, 오름차순 Lock, 전부 성공 또는 전부 실패.
 - 취소 시 FIFO 맨 앞 Client에게 Lock 안에서 바로 인계.
@@ -60,6 +61,7 @@ Request·Response는 Protocol 내부 작은 클래스로 둡니다.
 - **Log.java**: Server와 Client가 함께 사용하는 파일 로거를 작성합니다. 공통 형식·시간대·스레드 간 기록 직렬화·파일 닫기를 구현하고 다른 담당에게 사용 예제를 제공합니다.
 
 요청 생성:
+
 - Client당 5,000건을 무작위 0.2~1.0초 간격으로 보내며 이전 응답을 기다리지 않습니다.
 - 미보유 시 RESERVE 60% / MULTI 40%, 보유 시 RESERVE 30% / MULTI 20% / CANCEL 50%로 시작합니다.
 - CANCEL은 응답·통지로 보유를 확인했고 pending이 아닌 좌석에서 선택합니다. 후보가 없으면 예약 요청을 보냅니다.
@@ -67,6 +69,7 @@ Request·Response는 Protocol 내부 작은 클래스로 둡니다.
 - 인기 좌석 1~10번에 예약 선택 확률 80%로 시작합니다. CANCEL과 MULTI 개수까지 포함한 실제 좌석 선택 비율을 집계해 절반 이상 조건을 확인합니다.
 
 Client 상태:
+
 - 보유 좌석 Set, 진행 중 요청 Map, 대기 요청 Map으로 시작하고 공유 상태는 짧은 synchronized 구간으로 보호합니다.
 - 전송 전 pending에 등록하고 같은 좌석의 첫 응답이 오기 전에는 겹치는 요청을 만들지 않습니다.
 - 취소 pending 좌석은 재예약·중복 취소 후보에서 제외합니다. 취소 SUCCESS면 보유 제거, FAIL이면 유지합니다.
@@ -79,6 +82,7 @@ Client 상태:
 로그 호출 형식·파일 닫기 책임은 전원에게 공유합니다.
 
 완료 확인:
+
 - Client별 5,000건 송신·첫 응답 집계, NOTIFY 별도 집계.
 - 응답·통지 순서가 바뀌어도 보유 상태 유지.
 - BYE까지 연결을 유지하고 최종 보유 좌석 기록.
@@ -97,6 +101,7 @@ Client 상태:
 본인과 RequestQueue.put·SeatManager.snapshot·통계 조회를 연결하고 원격 접속 확인을 지원합니다.
 
 완료 확인:
+
 - 서버 연결별 수신 스레드를 만들지 않고 Listener 1개로 30개 연결 처리.
 - 메시지가 나뉘거나 붙어 와도 정확하게 파싱.
 - Worker와 Notifier의 동시 송신이 섞이지 않음.
@@ -112,18 +117,15 @@ Client 상태:
 - 응답 순서는 요청 순서라고 가정하지 않습니다.
 - 요청당 첫 응답 1개, NOTIFY는 원 대기 요청 ID를 사용하는 별도 이벤트입니다.
 
-```text
-Client → Server
-HELLO clientId
-RESERVE reqId seat
-RESERVE_MULTI reqId seat1,seat2,...
-CANCEL reqId seat
-
-Server → Client
-RESP reqId status seats reason
-NOTIFY reqId seat
-BYE
-```
+| 방향 | 형식 | 의미 |
+| --- | --- | --- |
+| Client → Server | `HELLO clientId` | Client 등록 |
+| Client → Server | `RESERVE reqId seat` | 단일 예약 |
+| Client → Server | `RESERVE_MULTI reqId seat1,seat2,...` | 2~4석 예약 |
+| Client → Server | `CANCEL reqId seat` | 본인 좌석 취소 |
+| Server → Client | `RESP reqId status seats reason` | 첫 응답 |
+| Server → Client | `NOTIFY reqId seat` | 원 대기 요청의 좌석 배정 |
+| Server → Client | `BYE` | 정상 종료 |
 
 - status: SUCCESS, FAIL, WAITLISTED.
 - seats: 요청 좌석을 쉼표로 구분.
@@ -133,12 +135,15 @@ BYE
 - Result는 첫 응답과 선택적 통지 대상·원 요청 ID·좌석·등록 시각을 담습니다.
 
 파트 간 메서드:
-- `RequestQueue.put(Task)`: Request와 ClientConnection을 묶어 적재.
-- `RequestQueue.take()`: 빈 Queue는 CV 대기, 종료 후 잔여 요청도 없으면 null.
-- `SeatManager.handle(Request)`: Socket·파일 I/O 없이 Result 반환.
-- `ClientConnection.send(String line)`: 줄바꿈까지 전체 송신 완료 후 반환, 실패는 IOException.
-- `SeatManager.snapshot()`: 좌석별 Lock으로 읽은 복사본 반환.
-- `Log.write(event, status, message)`: 공통 형식으로 한 줄 기록. Log 생성 시 노드 이름·파일을 지정.
+
+| 연결 | 메서드 | 계약 |
+| --- | --- | --- |
+| Listener → RequestQueue | `put(Task)` | Request와 ClientConnection을 묶어 적재 |
+| RequestQueue → Worker | `take()` | 빈 Queue는 CV 대기, 종료 후 잔여 요청도 없으면 null |
+| Worker → SeatManager | `handle(Request)` | Socket·파일 I/O 없이 Result 반환 |
+| Worker/Notifier → ClientConnection | `send(String line)` | 줄바꿈까지 전체 송신 완료 후 반환, 실패는 IOException |
+| Monitor → SeatManager | `snapshot()` | 좌석별 Lock으로 읽은 복사본 반환 |
+| 모든 파트 → Log | `write(event, status, message)` | 공통 형식으로 한 줄 기록. 생성 시 노드 이름·파일 지정 |
 
 메서드와 데이터 형태를 먼저 공유하되, 공통 필드를 바꿀 때는 관련 담당과 확인합니다.
 
