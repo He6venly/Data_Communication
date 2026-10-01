@@ -1,7 +1,7 @@
 # HW2 — Thread Pool 기반 실시간 좌석 예매 시스템
 
 Java로 좌석 100개를 관리하는 원격 서버와 로컬 Client 30개를 구현합니다.
-현재는 구현 전 설계입니다. 팀장이 공통 규약과 파트 간 인터페이스를 정해 전달합니다. 각 담당은 담당 파트 전체를 독립적으로 구현·검증하고, 팀장이 결과를 받아 리팩토링·통합합니다.
+현재 Protocol.java와 Interfaces.java를 팀장이 제공하며, 서버·Client의 실제 동작 구현은 각 담당이 진행합니다. 각 담당은 담당 파트 전체를 독립적으로 구현·검증하고, 팀장이 결과를 받아 리팩토링·통합합니다.
 
 ## 개발 범위와 보고서 메모
 
@@ -32,18 +32,21 @@ HW2/
    │  ├─ ClientMain.java
    │  └─ Client.java
    └─ common/
-      ├─ Protocol.java
+      ├─ Protocol.java       # 팀장 제공
+      ├─ Interfaces.java     # 팀장 제공
       └─ Log.java
 ```
 
-12개 파일로 시작합니다. Seat·WaitEntry·Result는 SeatManager 내부 작은 클래스,
-Request·Response는 Protocol 내부 작은 클래스로 둡니다.
+공통 인터페이스 파일 하나를 추가해 총 13개 Java 파일로 구성합니다. 현재 소스가 있는 파일은 Protocol.java와 Interfaces.java이며, 나머지는 담당별 구현 예정입니다.
+Request·Response는 Protocol 내부 일반 클래스, Task·Result·WaitNotice·조회용 데이터는 Interfaces 내부 일반 클래스입니다. Seat·WaitEntry는 SeatManager 내부에 둡니다. record·enum 없이 public final 필드와 숫자 상수·switch를 사용합니다.
 설정·통계·종료·요청 생성은 관련 클래스의 메서드로 작성합니다.
 
 ## 파트 1 — 서버 핵심·통합 / 팀장
 
-담당 패키지: `cwnu.dchw2.server`
+담당 패키지: `cwnu.dchw2.server`, 공통 계약은 `cwnu.dchw2.common`
 
+- **Protocol.java — 제공 완료**: 숫자 상수, 요청·응답 데이터, 메시지 인코딩·해석을 제공합니다.
+- **Interfaces.java — 제공 완료**: 파트 사이 메서드와 공유 데이터를 제공합니다. 변경은 팀장이 관리합니다.
 - **Server.java**: 실행 인자로 주소·포트·개발용 요청 건수를 받고 서버 구성요소를 연결합니다. Worker 10개를 시작하고 누적 통계와 정상 종료를 관리합니다.
 - **SeatManager.java**: 좌석 100개를 EMPTY로 초기화하고 좌석별 Lock·owner·FIFO waitlist를 관리합니다. 단일 예약, 취소, 다중 예약, 대기자 인계를 구현합니다.
 - **RequestQueue.java**: 요청 FIFO Queue를 구현합니다. 빈 Queue와 가득 찬 Queue는 Condition Variable로 대기하고, 종료 시 대기자를 깨웁니다. 현재·최대 길이를 기록합니다.
@@ -96,17 +99,18 @@ Client 상태:
 - BYE까지 연결을 유지하고 최종 보유 좌석 기록.
 - Server/Client 로그가 공통 형식을 따르고 여러 스레드 기록이 섞이지 않음.
 
-## 파트 3 — TCP 통신·Protocol·Monitor / 조원 3
+## 파트 3 — TCP 통신·Monitor / 조원 3
 
-담당 패키지: `cwnu.dchw2.server`, 메시지 규약은 `cwnu.dchw2.common`
+담당 패키지: `cwnu.dchw2.server`
 
-- **Protocol.java**: 팀장이 지정한 필드와 메시지 형식에 따라 요청·응답 데이터와 한 줄 인코딩·파싱을 작성합니다. 사용 예제를 팀장과 조원 2에게 공유합니다.
+팀장이 제공한 Protocol·Interfaces를 사용합니다. 공통 규약·데이터·인터페이스 작성은 조원 3의 담당에서 제외합니다.
+
 - **Listener.java**: NIO Selector 하나로 accept·다중 연결 수신·줄 분리·요청 Queue 적재를 수행합니다. 좌석 예약을 직접 판정하지 않습니다.
 - **ClientConnection.java**: 연결·Client ID·수신 버퍼·송신 Lock을 관리합니다. 메시지 전체가 전송된 후 반환하고 부분 쓰기와 write=0을 처리합니다.
 - **Monitor.java**: 5초마다 전체 좌석 현황·Queue 길이·누적 처리 수를 출력합니다. Queue에 요청이 있는데 30초간 처리 진전이 없으면 Deadlock 의심을 기록합니다.
 
 좌석 기능 없는 echo로 접속·메시지 분할/병합·부분 쓰기를 먼저 검사할 수 있습니다.
-팀장이 지정한 RequestQueue.put·SeatManager.snapshot·통계 조회에 맞춰 연결하고 원격 접속 확인을 지원합니다.
+Interfaces.RequestQueue·Seats·ServerContext 계약에 맞춰 연결하고 원격 접속 확인을 지원합니다.
 
 완료 확인:
 
@@ -129,31 +133,92 @@ Client 상태:
 
 | 방향 | 형식 | 의미 |
 | --- | --- | --- |
-| Client → Server | `HELLO clientId` | Client 등록 |
-| Client → Server | `RESERVE reqId seat` | 단일 예약 |
-| Client → Server | `RESERVE_MULTI reqId seat1,seat2,...` | 2~4석 예약 |
-| Client → Server | `CANCEL reqId seat` | 요청자 소유 좌석 취소 |
-| Server → Client | `RESP reqId status seats reason` | 첫 응답 |
-| Server → Client | `NOTIFY reqId seat` | 원 대기 요청의 좌석 배정 |
-| Server → Client | `BYE` | 정상 종료 |
+| Client → Server | `1000 clientId` | Client 등록 |
+| Client → Server | `1001 reqId seat` | 단일 예약 |
+| Client → Server | `1002 reqId seat1,seat2,...` | 2~4석 예약 |
+| Client → Server | `1003 reqId seat` | 요청자 소유 좌석 취소 |
+| Server → Client | `2000 reqId status seats reason` | 첫 응답 |
+| Server → Client | `2001 reqId seat` | 원 대기 요청의 좌석 배정 |
+| Server → Client | `2002` | 정상 종료 |
 
-- status: SUCCESS, FAIL, WAITLISTED.
-- seats: 요청 좌석을 쉼표로 구분.
+- status: SUCCESS=3000, FAIL=3001, WAITLISTED=3002. 코드에서는 Protocol 상수 이름을 사용합니다.
+- seats: 요청 좌석을 쉼표로 구분하고 원 순서를 유지합니다. 빈 목록은 `-`이며 0석 MULTI는 BAD_MULTI로 FAIL입니다.
+- Protocol.encode 메서드는 줄바꿈을 붙이지 않습니다. 실제 송신 담당이 LF를 한 번 붙입니다.
 - reason: OK, TAKEN, ALREADY_OWNER, ALREADY_WAITING, NOT_OWNER, BAD_SEAT, BAD_MULTI.
 - 숫자·명령 자체를 파싱할 수 없는 입력은 기록 후 연결 종료. 범위·MULTI 개수·중복 오류는 FAIL.
-- Request는 Client ID·요청 ID·명령·좌석 목록을 담습니다.
+- Request는 Client ID·요청 ID·명령·좌석 목록을 담습니다. 예약 메시지의 Client ID는 Listener가 등록된 연결에서 붙입니다.
+- HELLO는 첫 메시지로 한 번 전송하며 별도 응답은 없습니다. Client ID는 1~30, 요청 ID는 각 연결에서 1부터 증가합니다. 재등록·중복 접속·증가하지 않는 요청 ID는 규약 오류입니다.
 - Result는 첫 응답과 선택적 통지 대상·원 요청 ID·좌석·등록 시각을 담습니다.
 
-파트 간 메서드:
+파트 간 계약은 [Interfaces.java](src/cwnu/dchw2/common/Interfaces.java)에 실제 Java interface로 제공됩니다.
 
-| 연결 | 메서드 | 계약 |
+| 구현 클래스 | 구현할 interface | 주요 책임 |
 | --- | --- | --- |
-| Listener → RequestQueue | `put(Task)` | Request와 ClientConnection을 묶어 적재 |
-| RequestQueue → Worker | `take()` | 빈 Queue는 CV 대기, 종료 후 잔여 요청도 없으면 null |
-| Worker → SeatManager | `handle(Request)` | Socket·파일 I/O 없이 Result 반환 |
-| Worker/Notifier → ClientConnection | `send(String line)` | 줄바꿈까지 전체 송신 완료 후 반환, 실패는 IOException |
-| Monitor → SeatManager | `snapshot()` | 좌석별 Lock으로 읽은 복사본 반환 |
-| 모든 파트 → Log | `write(event, status, message)` | 공통 형식으로 한 줄 기록. 생성 시 노드 이름·파일 지정 |
+| Server | `Interfaces.ServerContext` | 연결 등록·조회, 첫 응답·통지·정지 감시 집계, 실패 전달 |
+| RequestQueue | `Interfaces.RequestQueue` | put/take/close/snapshot |
+| SeatManager | `Interfaces.Seats` | handle/snapshot/metrics |
+| ClientConnection | `Interfaces.Connection` | clientId/bindClientId/send/close |
+| Notifier | `Interfaces.Notifications` | submit/finish/run |
+| Listener, Monitor | `Interfaces.Stoppable` | run/stop |
+| Log | `Interfaces.Logger` | write/close |
+
+메서드의 반환값·예외·종료 조건은 소스 주석을 따릅니다. 각 담당은 상대 구현 클래스 대신 위 interface를 생성자 인자로 받아 임시 대역으로도 확인할 수 있습니다.
+
+```java
+// Listener의 수신 처리: 연결 등록과 완성된 줄 조립이 끝난 뒤
+Protocol.Request request = Protocol.decodeRequest(line, connection.clientId());
+queue.put(new Interfaces.Task(request, connection));
+
+// Worker의 처리: 여기의 queue/seats/notifier/server/log는 제공된 interface 타입
+Interfaces.Task task = queue.take();
+if (task != null) {
+    Interfaces.Result result = seats.handle(task.request);
+    if (result.notice != null) {
+        notifier.submit(result.notice);
+    }
+    task.connection.send(Protocol.encodeResponse(result.response));
+    server.recordFirstResponse(task.request.clientId);
+    log.write(Protocol.commandName(task.request.command), "INFO", result.detail);
+}
+```
+
+위 코드는 연결 흐름 예시입니다. 실제 run에서는 반복, 예외 처리, 요청·응답 로그를 추가합니다. IOException·InterruptedException 등 실패는 ServerContext.reportFailure로 전달합니다.
+
+생성자 형태는 다음으로 맞춥니다.
+
+```text
+Listener(Interfaces.ServerContext server, Interfaces.RequestQueue queue,
+         Interfaces.Logger log, String bindHost, int port)
+ClientConnection(SocketChannel channel)
+Monitor(Interfaces.ServerContext server, Interfaces.RequestQueue queue,
+        Interfaces.Seats seats, Interfaces.Logger log)
+Log(String node, Path file) throws IOException
+```
+
+Protocol만 사용하는 Client 예시:
+
+```java
+Protocol.Request request = new Protocol.Request(
+    7, 12, Protocol.RESERVE, List.of(42)
+);
+String line = Protocol.encodeRequest(request); // "1001 12 42"
+// pending 등록·송신 시각 기록 후, Client 송신 담당이 LF를 붙여 전송
+
+Protocol.Response reply = Protocol.decodeResponse("2000 12 3002 42 TAKEN");
+switch (reply.type) {
+    case Protocol.RESP:
+        // reply.requestId로 pending을 찾아 첫 응답과 상태 처리
+        break;
+    case Protocol.NOTIFY:
+        // 원 예약 요청 번호로 배정 처리. 첫 응답 건수에는 포함하지 않음
+        break;
+    case Protocol.BYE:
+        // 최종 목록 기록·정상 종료
+        break;
+}
+```
+
+Server의 판정에는 Protocol.response(request, status, reason), Notifier에는 Protocol.notification(requestId, seat), 종료에는 Protocol.bye()를 사용하면 됩니다.
 
 메서드와 데이터 형태는 팀장이 확정해 전달합니다. 공통 필드나 메서드를 바꿀 필요가 있으면 팀장에게 제안하고, 확정된 변경을 관련 담당에게 전달한 뒤 반영합니다.
 
@@ -161,11 +226,11 @@ Client 상태:
 
 - Server의 main을 Listener로 사용하고 Worker 10개·Notifier 1개·Monitor 1개를 둡니다.
 - 요청·연결별 서버 스레드나 로그·송신 전용 스레드를 추가하지 않습니다. Client 송수신 스레드는 별개입니다.
-- owner와 waitlist는 해당 좌석 Lock 안에서만 접근합니다. Monitor도 snapshot을 사용합니다.
+- owner와 waitlist는 해당 좌석 Lock 안에서만 접근합니다. Monitor의 snapshot은 좌석별 tryLock을 사용하며 못 읽은 좌석은 readable=false, ownerId/waitingCount=-1로 표시합니다. 최종 상태는 Worker 종료 후 조회합니다.
 - MULTI는 입력 검사 후 오름차순 Lock 획득, 모두 비어 있을 때 일괄 배정, finally에서 역순 해제합니다.
 - Request Queue 용량은 1,024. 포화 시 notFull, 비어 있으면 notEmpty Condition에서 while 조건 검사로 대기합니다.
 - Queue Lock을 놓고 좌석 Lock을 획득합니다. Socket·파일 I/O는 좌석 Lock 밖에서 수행합니다.
-- ClientConnection은 송신 Lock으로 메시지 전체를 직렬화합니다. NIO write=0을 바쁜 무한 반복으로 처리하지 않습니다.
+- ClientConnection은 송신 Lock으로 메시지 전체를 직렬화합니다. NIO write=0을 바쁜 무한 반복으로 처리하지 않습니다. 쓰기 준비 대기는 Listener의 Queue 적재 완료에 의존하지 않습니다.
 
 ### 로그·통계·종료
 
@@ -174,6 +239,7 @@ Client 상태:
 ```
 
 - UTC 로그, 경과시간은 같은 노드의 monotonic clock으로 측정합니다.
+- Java 시간 형식은 `HH:mm:ss.SSS`로 지정합니다. 노드 이름은 `SERVER`, `CLIENT1`~`CLIENT30`, 저장 위치는 실행 폴더의 `logs/Server.txt`, `logs/Client1.txt`~`logs/Client30.txt`입니다. Log 생성자가 필요한 상위 폴더를 생성합니다.
 - Server.txt, Client1.txt~Client30.txt에 Client ID·요청 ID·좌석·결과를 기록합니다.
 - STATUS는 SUCCESS/FAIL/INFO/WARN. WAITLISTED는 WAITLIST 이벤트의 WARN으로 기록합니다.
 - INIT, CONNECT, RESERVE, RESERVE_MULTI, CANCEL, LOCK, WAITLIST, NOTIFY, POOL, DOUBLE_BOOKING_CHECK, TERMINATE와 추가 감시·오류 이벤트를 명세에 정리합니다.
@@ -181,16 +247,31 @@ Client 상태:
 - 최대 Queue 길이는 변경 시 갱신하고 Lock 경합은 최초 tryLock 실패 시 1회 집계합니다.
 - 처리량은 첫 Client 연결~마지막 첫 응답 송신, 응답시간은 Client 송신~첫 응답 수신, 대기시간은 Server 등록~NOTIFY 송신으로 측정합니다.
 - 정상 종료는 Client별 첫 응답 5,000건·합계 150,000건 확인 후 남은 요청·통지까지 처리합니다.
-- Worker join → Notifier 잔여 통지 전송·join → BYE → 최종 기록·Monitor 종료·Socket/Log 정리 순서를 지킵니다. Queue 비움만 보고 종료하지 않습니다.
+- 입력 중단·RequestQueue.close → Worker join → Notifier.finish·잔여 통지 전송·join → BYE → Monitor 중단·join·최종 기록 → Socket/Log 정리 순서를 지킵니다. Queue 비움만 보고 종료하지 않습니다.
+- Listener.stop은 수신과 Selector 대기만 끝내며 등록된 연결은 BYE까지 유지합니다. Notifier.finish는 정상 실행에서 Worker join 후 호출합니다.
 - CV 대기자를 깨우고 Listener의 select를 해제할 수 있어야 합니다.
 - 종료 시 미해결 Waitlist를 별도 기록합니다. 연결 단절·송신 실패는 실패 실행으로 남기고 원인 수정 후 새 실행합니다.
+
+요청·응답 로그의 message에는 `clientId`, `requestId`, `seats`, `result`를 공통 이름으로 기록합니다. 좌석은 공백 없는 쉼표 목록, 빈 목록은 `-`입니다. 요청 seats는 원 순서를 유지하고 최종 보유 목록만 오름차순으로 정렬합니다. 요청 전송·수신은 result=REQUEST, 첫 응답은 SUCCESS/FAIL/WAITLISTED, 통지는 NOTIFY로 기록합니다. 추가 필드는 뒤에 붙일 수 있습니다.
+
+```text
+[12:00:00.000] CLIENT7 | RESERVE | INFO | clientId=7 requestId=12 seats=42 result=REQUEST
+[12:00:00.015] CLIENT7 | WAITLIST | WARN | clientId=7 requestId=12 seats=42 result=WAITLISTED reason=TAKEN
+[12:00:01.000] CLIENT7 | NOTIFY | SUCCESS | clientId=7 requestId=12 seats=42 result=NOTIFY
+[12:00:02.000] CLIENT7 | TERMINATE | INFO | clientId=7 heldSeats=3,5,42
+```
+
+Client 종료 시 최종 보유 목록과 미해결 대기 수를 각각 기록합니다. Server는 최종 owner를 `seat=42 ownerId=7` 형식으로 좌석 1~100번 순서로 남기며 EMPTY는 ownerId=0입니다. 위 시각과 좌석은 형식 예시이며 실측 결과가 아닙니다.
 
 ### 독립 구현과 팀장 통합
 
 - 팀장이 메시지·데이터 필드·메서드 이름·인자·반환값·예외·종료 조건을 지정해 전달합니다.
 - 각 담당은 자기 파트 전체를 구현합니다. 상대 파트가 필요한 부분은 지정된 인터페이스의 임시 대역이나 입력 예제로 검증할 수 있습니다.
-- 조원 2는 Client 전체와 Log, 조원 3은 Protocol·Listener·ClientConnection·Monitor를 독립적으로 구현하고 팀장은 서버 핵심을 구현합니다.
+- 팀장은 Protocol·Interfaces와 서버 핵심, 조원 2는 Client 전체와 Log, 조원 3은 Listener·ClientConnection·Monitor를 구현합니다. 조원에게 공통 규약·인터페이스 작성은 배정하지 않습니다.
 - 조원은 담당 소스와 함께 실행·검증 방법, 확인한 결과, 남은 문제를 전달합니다.
+- 조원 2는 예제 RESP·NOTIFY를 수신 처리에 넣어 정상 예약·취소, 취소 FAIL, WAITLISTED, NOTIFY 선도착을 확인합니다. 송신과 무관하게 수신 상태를 검사할 수 있도록 처리 메서드를 나눕니다. Protocol·Interfaces 외 서버 구현이 없어도 임시 서버로 TCP 송수신을 확인할 수 있습니다.
+- 조원 3은 임시 RequestQueue·ServerContext·Seats·Logger로 완성된 줄의 Queue 적재, 분할/병합 수신, 같은 연결의 동시 송신을 확인합니다. Monitor는 정상 진행·정지 구간당 1회 집계·진행 재개 후 새 정지·stop 후 종료를 확인합니다.
+- 임시 대역은 확인용이며 정상 종료 신호·첫 응답 집계 등 공통 계약을 지킵니다. 최종 프로그램 구성에서는 제외합니다.
 - 팀장이 파트별 결과를 받아 공통 인터페이스에 맞게 리팩토링·통합하고 실제 TCP 전체 동작을 검증합니다.
 - 담당 내부 구현은 자유롭게 정하되, 공통 규약 변경이 필요하면 팀장에게 보고합니다.
 - 같은 좌석 경쟁, [5,3] vs [3,5], 일부 점유된 MULTI, FIFO 인계, NOTIFY 선도착, 마지막 통지 후 종료를 확인합니다.
@@ -204,8 +285,22 @@ Client 상태:
 
 ### 실행 환경과 제출
 
-- Java 표준 라이브러리 중심으로 작성합니다. JDK 버전·컴파일 방법은 팀장이 각 담당의 환경을 확인해 지정합니다.
-- 주소·포트와 개발용 요청 건수는 실행 인자로 지정합니다. 실제 명령은 구현 후 추가합니다.
+- JDK 17 기준, Java 표준 라이브러리를 사용합니다. 현재 제공된 공통 코드만 컴파일하는 명령은 HW2 폴더에서 다음과 같습니다.
+
+```text
+javac --release 17 -encoding UTF-8 -d out src/cwnu/dchw2/common/Protocol.java src/cwnu/dchw2/common/Interfaces.java
+```
+
+- 아직 전체 Server/Client 실행 코드는 없습니다. 공통 코드 컴파일 성공은 전체 통신·좌석 구현 검증을 의미하지 않습니다. out의 class 파일과 실행 로그는 GitHub에 올리지 않습니다.
+- Server와 ClientMain의 실행 인자 순서는 다음으로 고정합니다. 세 인자를 모두 받으며 주소·포트·개발용 요청 수를 소스에 고정하지 않습니다.
+
+```text
+Server <bindHost> <port> <client당 요청 수>
+ClientMain <serverHost> <port> <client당 요청 수>
+```
+
+- Server의 bindHost는 수신할 로컬 인터페이스 주소, ClientMain의 serverHost는 접속할 서버 주소입니다. Client 수는 30개, Worker 수는 10개로 고정하고 요청 수만 축소할 수 있습니다. 포트는 1~65535, 요청 수는 양수로 검사합니다.
+- 같은 실행의 Server와 ClientMain에는 동일한 포트와 Client당 요청 수를 지정합니다. 정식 실행의 요청 수는 5000이며 개발용은 10 등 작은 값으로 지정할 수 있습니다. 실제 java 실행 명령은 구현 후 추가합니다.
 - GitHub에는 코드와 README만 관리하며 개인 세션·PDF·실행 로그·영상은 로컬 보관합니다.
 - 다른 담당 파일 수정은 해당 담당에게 공유합니다. 공통 계약 변경은 팀장에게 제안하고 팀장이 확정·전달한 내용만 반영합니다.
 - 제출 ZIP은 전체 소스, AllDefinedLogs.txt, 같은 원격 정식 실행의 Server.txt·Client1.txt~Client30.txt, Readme.txt, 영상 링크의 download.txt를 포함합니다.
