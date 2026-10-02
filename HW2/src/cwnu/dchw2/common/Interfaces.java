@@ -1,5 +1,7 @@
 package cwnu.dchw2.common;
 
+import cwnu.dchw2.common.Protocol.Request;
+import cwnu.dchw2.common.Protocol.Response;
 import java.io.IOException;
 import java.util.List;
 
@@ -36,7 +38,7 @@ public final class Interfaces {
 
     public interface Seats {
         /** 소켓·파일 I/O 없이 판정한다. 모든 좌석 Lock을 해제하고 반환한다. */
-        Result handle(Protocol.Request request);
+        Result handle(Request request);
 
         /** 좌석별 tryLock으로 복사한다. 읽지 못한 좌석은 readable=false로 반환한다. */
         List<SeatView> snapshot();
@@ -91,10 +93,10 @@ public final class Interfaces {
     }
 
     public static final class Task {
-        public final Protocol.Request request;
+        public final Request request;
         public final Connection connection;
 
-        public Task(Protocol.Request request, Connection connection) {
+        public Task(Request request, Connection connection) {
             this.request = request;
             this.connection = connection;
         }
@@ -125,12 +127,12 @@ public final class Interfaces {
     }
 
     public static final class Result {
-        public final Protocol.Response response;
+        public final Response response;
         public final WaitNotice notice;
         public final String detail;
 
         /** notice는 대기자 인계 때만 존재하고 나머지는 null이다. detail은 로그 설명이다. */
-        public Result(Protocol.Response response, WaitNotice notice, String detail) {
+        public Result(Response response, WaitNotice notice, String detail) {
             this.response = response;
             this.notice = notice;
             this.detail = detail;
