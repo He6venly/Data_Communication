@@ -358,7 +358,7 @@ Windows의 JDK 21.0.6에서 `javac --release 17 -encoding UTF-8 -Xlint:all` 컴�
 | 위 정상 대역 실행 | 서버 수지와 대역 보유 목록 대조 | 배정 30−해제 1=보유 29, WAITLISTED 1=통지 1+미해결 0, owner 일치 |
 | 실패 주입 대역 실행 | RESP·NOTIFY·요청/INIT 로그 실패, Listener 조기 반환, 예상 밖 interrupt, 막힌 send | 실패 반환·대기 해제·등록 연결/로그 닫기·스레드 종료, BYE로 성공 표시하지 않음 |
 | 별도 JVM + 조원 클래스명 대역 | main 연결, 인자 오류·합계 overflow·클래스 누락·Monitor 초기화/Logger.close 실패 | 정상 종료 코드 0, 실패 종료 코드 1, 초기화 실패 시 Logger 정리 |
-| 미검증 | 실제 TCP·NIO 부분 쓰기·실제 Client 상태/로그·Monitor 5초 감시·원격 30×5000 실행 | 조원 코드 통합 후 확인 필요 |
+| 미검증 | 실제 TCP·NIO 부분 쓰기·실제 Client 상태/로그·Monitor 5초 감시·원격 30×5000 실행·JDK 17 런타임/Linux 실행 | 조원 코드 통합과 실제 실행 환경에서 확인 필요 |
 
 실제 처리 경로에서 이미 owner가 있는 좌석에 대한 재배정 시도를 검사하고 배정·해제·대기 등록을 집계합니다. MULTI는 입력을 검사한 뒤 오름차순으로 Lock을 획득하고 역순 finally 해제를 수행합니다. CANCEL 인계는 같은 좌석 Lock 안에서 해제 1·배정 1로 계산합니다. tryLock의 최초 실패만 경합 1회로 세며 snapshot 읽기 실패는 Worker 경합에 더하지 않습니다.
 
