@@ -1,7 +1,7 @@
 # HW2 — Thread Pool 기반 실시간 좌석 예매 시스템
 
 Java로 좌석 100개를 관리하는 원격 서버와 로컬 Client 30개를 구현합니다.
-Protocol.java와 Interfaces.java를 팀장이 제공하며, 팀장 담당 Server·SeatManager·BoundedRequestQueue·Worker·Notifier와 파트 2 담당 ClientMain·Client·Log의 구현·독립 검증을 완료했습니다. Listener·ClientConnection·Monitor는 파트 3 담당이 구현합니다. 각 담당은 담당 파트 전체를 독립적으로 구현·검증하고, 팀장이 결과를 받아 리팩토링·통합합니다.
+Protocol.java와 Interfaces.java를 팀장이 제공하며, 팀장 담당 Server·SeatManager·BoundedRequestQueue·Worker·Notifier의 구현과 독립 검증을 완료했습니다. Client·Log·Listener·ClientConnection·Monitor는 각 담당이 구현합니다. 각 담당은 담당 파트 전체를 독립적으로 구현·검증하고, 팀장이 결과를 받아 리팩토링·통합합니다.
 
 ## 개발 범위와 보고서 메모
 
@@ -37,7 +37,7 @@ HW2/
       └─ Log.java
 ```
 
-공통 인터페이스 파일 하나를 추가해 총 13개 Java 파일로 구성합니다. 현재 소스는 공통 코드 2개·팀장 서버 핵심 5개·파트 2 Client/Log 3개이며, 나머지 통신/Monitor 3개는 파트 3 구현 예정입니다.
+공통 인터페이스 파일 하나를 추가해 총 13개 Java 파일로 구성합니다. 현재 소스는 공통 코드 2개와 팀장 서버 핵심 5개이며, 나머지 6개는 담당별 구현 예정입니다.
 Request·Response는 Protocol 내부 일반 클래스, Task·Result·WaitNotice·조회용 데이터는 Interfaces 내부 일반 클래스입니다. Seat·WaitEntry는 SeatManager 내부에 둡니다. record·enum 없이 public final 필드와 숫자 상수·switch를 사용합니다.
 설정·통계·종료·요청 생성은 관련 클래스의 메서드로 작성합니다.
 
@@ -351,77 +351,7 @@ java -cp out cwnu.dchw2.server.Server 0.0.0.0 12345 10
 
 `bindHost`·포트·요청 수는 예시 실행 인자이며 코드에 고정하지 않습니다. Server.main은 `Log(String, Path)`, `Listener(ServerContext, RequestQueue, Logger, String, int)`, `Monitor(ServerContext, RequestQueue, Seats, Logger)`를 기존 규약 그대로 찾습니다. 구성 초기화 실패와 Logger.close 실패도 종료 코드 1로 처리합니다.
 
-## 파트 2 구현·실행·독립 검증 결과
-
-`ClientMain.java`, `Client.java`, `Log.java`를 구현했습니다. Protocol·Interfaces·팀장 서버 핵심과 파트 3 담당 파일은 변경하지 않았습니다.
-
-ClientMain은 인자 검사 후 Client 30개와 각 Client의 Logger를 준비합니다. Client의 `run`이 수신을 맡고 별도 스레드 하나가 요청을 보냅니다. 먼저 종료한 Client를 종료 Queue로 확인하므로 Client 번호와 관계없이 실패를 감지해 전체 연결·대기를 해제합니다. 정상 종료와 실패 모두 송수신 스레드 종료를 기다린 뒤 Log를 닫습니다. 실패 시 종료 코드는 1입니다.
-
-Client는 첫 응답 전 pending에 등록하고 좌석을 다른 요청에서 제외합니다. 모든 좌석이 pending일 때만 상태 변경을 기다립니다. waitlist 등록은 송신을 막지 않으며 재예약 FAIL도 원 대기 요청을 지우지 않습니다. 선도착 NOTIFY는 보유에 반영하되 첫 WAITLISTED까지 해당 좌석의 pending을 유지해 취소를 막습니다. 응답시간은 요청 로그 기록 후 실제 송신을 시작하는 시점부터 첫 RESP 수신까지 `System.nanoTime()` 차이로 계산합니다. NOTIFY는 첫 응답 건수·평균 응답시간에 포함하지 않습니다.
-
-BYE까지 연결을 유지하며 송신 완료만으로 연결을 닫지 않습니다. 종료 로그에 오름차순 보유 목록, 원 요청 ID별 미해결 대기, 송신·첫 응답·성공·실패·WAITLISTED·NOTIFY·pending 수, 평균 응답시간(ms), 명령별 요청 수, CANCEL과 MULTI 개수를 포함한 실제 인기 좌석 선택 비율을 남깁니다. 조기 BYE·BYE 없는 연결 단절·알 수 없거나 중복된 응답·소켓/로그 오류는 실패입니다. 인기 좌석 비율이 절반 미만이면 `popularCondition=BELOW_HALF`로 보고하며 확률을 임의 변경하지 않습니다.
-
-파트 2만 컴파일하려면 HW2 폴더에서 다음을 실행합니다. 표준 라이브러리만 사용합니다.
-
-```powershell
-javac --release 17 -encoding UTF-8 -Xlint:all -d out src/cwnu/dchw2/common/Protocol.java src/cwnu/dchw2/common/Interfaces.java src/cwnu/dchw2/common/Log.java src/cwnu/dchw2/client/Client.java src/cwnu/dchw2/client/ClientMain.java
-```
-
-파트 3 통합 후 서버를 먼저 실행하고 별도 터미널에서 Client를 실행합니다. 같은 실행의 포트·요청 수를 맞춥니다.
-
-```powershell
-java -cp out cwnu.dchw2.client.ClientMain 127.0.0.1 12345 10
-# 정식 원격 실행: 실제 서버 주소와 같은 포트 사용, Client당 요청 수는 5000
-java -cp out cwnu.dchw2.client.ClientMain <serverHost> <port> 5000
-```
-
-마지막 줄의 `<serverHost>`·`<port>`는 설명용 자리표시자입니다. 실제 값으로 바꿔 실행합니다. 파일은 실행 폴더의 `logs/Client1.txt`~`logs/Client30.txt`이며 같은 파일로 새 실행하면 이전 내용을 초기화합니다. 이전 실행을 보관하려면 실행 폴더를 구분하거나 실행 전 logs 폴더를 복사합니다.
-
-연결·확인용 메서드는 다음과 같습니다. 추가 데이터 파일 없이 Client 내부 일반 클래스로 조회 값을 제공합니다.
-
-| 메서드 | 사용·책임 |
-| --- | --- |
-| `Client(int clientId, String host, int port, int requestsPerClient, Logger log)` | ClientMain이 생성. 번호 1~30, 주소·포트·요청 수 검사 |
-| `run()` | 연결 1개, 수신 흐름, 송신 스레드 시작·종료. 한 번만 호출 |
-| `failure()` | 실패 원인 조회. 정상 종료면 null |
-| `abort(Throwable cause)` | 실패 설정·소켓 닫기·송신 interrupt·상태 대기 해제 |
-| `snapshot()` | 상태 Lock 안에서 보유·대기·집계를 불변 목록과 Snapshot으로 복사 |
-| `prepareRequest()`, `handleResponse(Response)` | 같은 client 패키지의 독립 검증에서 요청 생성과 예제 응답 처리를 확인하는 경로 |
-
-공통 Log 사용 예제입니다. `Log(String node, Path file)`은 폴더를 생성하고 UTF-8 파일을 열며, 각 write를 직렬화해 UTC `HH:mm:ss.SSS` 시각으로 기록하고 flush합니다. message의 CR/LF는 공백으로 바꿉니다. close는 중복 호출 가능하며 close 후 write는 IOException입니다. I/O 오류를 숨기지 않으므로 호출자가 실행 실패를 처리해야 합니다.
-
-```java
-import cwnu.dchw2.common.Log;
-import cwnu.dchw2.common.Interfaces.Logger;
-import java.nio.file.Path;
-
-// 독립 사용: 생성한 코드가 닫는다.
-try (Logger log = new Log("CLIENT7", Path.of("logs", "Client7.txt"))) {
-    log.write("RESERVE", "INFO", "clientId=7 requestId=12 seats=42 result=REQUEST");
-}
-// Server.run에 전달한 Logger는 Server가 닫는다.
-// Client 생성자에 전달한 Logger는 ClientMain이 송수신 종료 후 닫는다.
-```
-
-Windows의 JDK 21.0.12.1에서 `--release 17 -encoding UTF-8 -Xlint:all` 컴파일 경고·오류 0건과 독립 검증 20개가 통과했습니다. 임시 검증 소스·대역·결과는 로컬 `Sol Session/verification`에만 보관합니다. 정상 소스 목록·GitHub 업로드에는 포함하지 않습니다.
-
-| 구분 | 실제 확인 범위 | 결과 |
-| --- | --- | --- |
-| 예제 응답·실제 Client 처리 경로 | 단일 예약, MULTI 2~4석·중복 제외, 정상 취소·취소 FAIL | 성공 좌석 반영, MULTI FAIL·취소 FAIL 시 기존 보유 유지 |
-| 예제 응답·실제 Client 처리 경로 | WAITLISTED→NOTIFY, NOTIFY→WAITLISTED, 재예약 FAIL | 원 요청 ID로 연결, 통지 별도 집계, 보유·원 대기 보존, 선도착 좌석 취소 차단 |
-| 요청 생성·상태 대기 | 첫 응답 미수신 상태의 추가 요청·역순 응답·100석 pending·100석 waitlist | pending 좌석 겹침 없음, 전 pending 시 대기·첫 응답 후 해제, 전 waitlist라도 계속 송신 |
-| 실제 Log | 8개 스레드가 500줄씩 기록, JVM 기본 시간대 Asia/Seoul | 4,000줄 유실·섞임·중복 0, UTC·UTF-8·CR/LF 치환·폴더 생성·닫기 확인 |
-| 임시 TCP 서버 + 실제 Client | 첫 RESP를 두 번째 요청 뒤로 지연, 역순·분할·병합 응답 | 응답 대기 없이 요청 2건 송신, 정확한 수신·BYE 후 종료 |
-| 실제 팀장 Server·Worker·Notifier·Seats·Queue + 임시 통신/Monitor + 실제 ClientMain | 30명×20건, HELLO·연속 요청 ID·송신 간격·분할 응답·BYE·로그 30개 | 송신 600·첫 응답 600·pending 0, 모든 Client 정상 종료 |
-| 위 축소 TCP 실행의 실제 로그 대조 | CANCEL·MULTI 포함 좌석 선택, Server owner와 Client 보유, WAITLIST 수지 | 전체 선택 982석 중 인기 739석(75.25%), 통지 63·미해결 119·최종 보유 18석, Client 간 중복 0·Server owner 일치 |
-| 별도 JVM 실패 검증 | 인자 오류 8종, 접속 거절, Client30 조기 BYE, 로그 생성 실패 | 종료 코드 1, 다른 Client의 read·sleep 해제·전체 종료, 남은 송신 스레드 0 |
-| 미검증 | 파트 3 실제 Listener/ClientConnection/Monitor, 원격 30×5000, JDK 17 런타임·Linux | 팀장 통합 후 확인 필요 |
-
-위 실측 수치는 한 번의 축소 실행 결과이며 무작위 요청이므로 새 실행에서 달라집니다. 임시 통신은 검증 목적으로 연결별 수신 스레드를 사용했습니다. 파트 3의 Selector 1개 처리·부분 쓰기·write=0 대기·Monitor 감시 구현을 검증한 결과가 아닙니다. 정식 150,000건 완료나 과제 전체 검증 완료로 해석하지 않습니다.
-
-검증 중 Windows JVM의 기본 콘솔 인코딩으로 출력한 한글을 검증 코드가 UTF-8로 읽어 실패했습니다. 실제 Log 파일은 이미 명시적 UTF-8이었으며, 검증 JVM의 콘솔 인코딩을 UTF-8로 지정한 뒤 검증 20개를 통과했습니다. 자동 재접속·재전송이나 정교한 교착 탐지 실험은 수행하지 않았습니다.
-
-## 팀장 핵심의 실제 구현·검증 결과와 한계
+## 실제 구현·검증 결과와 한계
 
 Windows의 JDK 21.0.6에서 `javac --release 17 -encoding UTF-8 -Xlint:all` 컴파일 경고·오류 0건, 핵심 독립 검증 22개와 별도 JVM 진입점 검증 8개가 통과했습니다. 이는 팀장 핵심 구현과 대역 연결 결과이며 원격 정식 부하의 실측 결과가 아닙니다. 검증 소스와 임시 대역은 로컬 `Sol Session/verification`에 보관하고 GitHub에는 팀장 소스 5개·Interfaces.java의 import 정리·이 README의 변경만 반영합니다.
 
