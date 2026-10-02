@@ -1,6 +1,8 @@
 package cwnu.dchw2.server;
 
-import cwnu.dchw2.common.Interfaces;
+import cwnu.dchw2.common.Interfaces.QueueView;
+import cwnu.dchw2.common.Interfaces.RequestQueue;
+import cwnu.dchw2.common.Interfaces.Task;
 import cwnu.dchw2.common.Protocol;
 import java.util.ArrayDeque;
 import java.util.Objects;
@@ -8,8 +10,8 @@ import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.ReentrantLock;
 
 /** close는 입력만 닫는다. 이미 적재된 요청은 take로 끝까지 꺼낸다. */
-public final class RequestQueue implements Interfaces.RequestQueue {
-    private final ArrayDeque<Interfaces.Task> tasks = new ArrayDeque<>();
+public final class BoundedRequestQueue implements RequestQueue {
+    private final ArrayDeque<Task> tasks = new ArrayDeque<>();
     private final ReentrantLock lock = new ReentrantLock();
     private final Condition notEmpty = lock.newCondition();
     private final Condition notFull = lock.newCondition();
@@ -17,11 +19,11 @@ public final class RequestQueue implements Interfaces.RequestQueue {
     private boolean closed;
     private int maxSize;
 
-    public RequestQueue() {
+    public BoundedRequestQueue() {
         this(Protocol.REQUEST_QUEUE_CAPACITY);
     }
 
-    public RequestQueue(int capacity) {
+    public BoundedRequestQueue(int capacity) {
         if (capacity < 1) {
             throw new IllegalArgumentException("Queue 용량은 양수여야 합니다.");
         }
@@ -29,7 +31,7 @@ public final class RequestQueue implements Interfaces.RequestQueue {
     }
 
     @Override
-    public void put(Interfaces.Task task) throws InterruptedException {
+    public void put(Task task) throws InterruptedException {
         Objects.requireNonNull(task, "task");
         lock.lockInterruptibly();
         try {
@@ -48,7 +50,7 @@ public final class RequestQueue implements Interfaces.RequestQueue {
     }
 
     @Override
-    public Interfaces.Task take() throws InterruptedException {
+    public Task take() throws InterruptedException {
         lock.lockInterruptibly();
         try {
             while (tasks.isEmpty() && !closed) {
@@ -57,7 +59,7 @@ public final class RequestQueue implements Interfaces.RequestQueue {
             if (tasks.isEmpty()) {
                 return null;
             }
-            Interfaces.Task task = tasks.removeFirst();
+            Task task = tasks.removeFirst();
             notFull.signal();
             return task;
         } finally {
@@ -78,10 +80,10 @@ public final class RequestQueue implements Interfaces.RequestQueue {
     }
 
     @Override
-    public Interfaces.QueueView snapshot() {
+    public QueueView snapshot() {
         lock.lock();
         try {
-            return new Interfaces.QueueView(tasks.size(), maxSize);
+            return new QueueView(tasks.size(), maxSize);
         } finally {
             lock.unlock();
         }

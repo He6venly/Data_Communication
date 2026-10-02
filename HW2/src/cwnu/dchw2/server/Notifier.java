@@ -1,6 +1,10 @@
 package cwnu.dchw2.server;
 
-import cwnu.dchw2.common.Interfaces;
+import cwnu.dchw2.common.Interfaces.Connection;
+import cwnu.dchw2.common.Interfaces.Logger;
+import cwnu.dchw2.common.Interfaces.Notifications;
+import cwnu.dchw2.common.Interfaces.ServerContext;
+import cwnu.dchw2.common.Interfaces.WaitNotice;
 import cwnu.dchw2.common.Protocol;
 import java.io.IOException;
 import java.util.ArrayDeque;
@@ -8,22 +12,22 @@ import java.util.Objects;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.ReentrantLock;
 
-public final class Notifier implements Interfaces.Notifications {
-    private final ArrayDeque<Interfaces.WaitNotice> notices = new ArrayDeque<>();
+public final class Notifier implements Notifications {
+    private final ArrayDeque<WaitNotice> notices = new ArrayDeque<>();
     private final ReentrantLock lock = new ReentrantLock();
     private final Condition available = lock.newCondition();
-    private final Interfaces.ServerContext server;
-    private final Interfaces.Logger log;
+    private final ServerContext server;
+    private final Logger log;
     private boolean finished;
     private volatile boolean aborted;
 
-    public Notifier(Interfaces.ServerContext server, Interfaces.Logger log) {
+    public Notifier(ServerContext server, Logger log) {
         this.server = server;
         this.log = log;
     }
 
     @Override
-    public void submit(Interfaces.WaitNotice notice) {
+    public void submit(WaitNotice notice) {
         Objects.requireNonNull(notice, "notice");
         lock.lock();
         try {
@@ -60,7 +64,7 @@ public final class Notifier implements Interfaces.Notifications {
         }
     }
 
-    private Interfaces.WaitNotice take() throws InterruptedException {
+    private WaitNotice take() throws InterruptedException {
         lock.lockInterruptibly();
         try {
             while (notices.isEmpty() && !finished) {
@@ -75,8 +79,8 @@ public final class Notifier implements Interfaces.Notifications {
     @Override
     public void run() {
         try {
-            for (Interfaces.WaitNotice notice; (notice = take()) != null;) {
-                Interfaces.Connection connection = server.findClient(notice.clientId);
+            for (WaitNotice notice; (notice = take()) != null;) {
+                Connection connection = server.findClient(notice.clientId);
                 if (connection == null) {
                     throw new IOException("통지 대상 Client가 미등록 상태입니다: " + notice.clientId);
                 }

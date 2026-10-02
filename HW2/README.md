@@ -1,7 +1,7 @@
 # HW2 — Thread Pool 기반 실시간 좌석 예매 시스템
 
 Java로 좌석 100개를 관리하는 원격 서버와 로컬 Client 30개를 구현합니다.
-Protocol.java와 Interfaces.java를 팀장이 제공하며, 팀장 담당 Server·SeatManager·RequestQueue·Worker·Notifier의 구현과 독립 검증을 완료했습니다. Client·Log·Listener·ClientConnection·Monitor는 각 담당이 구현합니다. 각 담당은 담당 파트 전체를 독립적으로 구현·검증하고, 팀장이 결과를 받아 리팩토링·통합합니다.
+Protocol.java와 Interfaces.java를 팀장이 제공하며, 팀장 담당 Server·SeatManager·BoundedRequestQueue·Worker·Notifier의 구현과 독립 검증을 완료했습니다. Client·Log·Listener·ClientConnection·Monitor는 각 담당이 구현합니다. 각 담당은 담당 파트 전체를 독립적으로 구현·검증하고, 팀장이 결과를 받아 리팩토링·통합합니다.
 
 ## 개발 범위와 보고서 메모
 
@@ -22,7 +22,7 @@ HW2/
    ├─ server/
    │  ├─ Server.java
    │  ├─ SeatManager.java
-   │  ├─ RequestQueue.java
+   │  ├─ BoundedRequestQueue.java
    │  ├─ Worker.java
    │  ├─ Notifier.java
    │  ├─ Listener.java
@@ -49,7 +49,7 @@ Request·Response는 Protocol 내부 일반 클래스, Task·Result·WaitNotice�
 - **Interfaces.java — 제공 완료**: 파트 사이 메서드와 공유 데이터를 제공합니다. 변경은 팀장이 관리합니다.
 - **Server.java**: 실행 인자로 주소·포트·개발용 요청 건수를 받고 서버 구성요소를 연결합니다. Worker 10개를 시작하고 누적 통계와 정상 종료를 관리합니다.
 - **SeatManager.java**: 좌석 100개를 EMPTY로 초기화하고 좌석별 Lock·owner·FIFO waitlist를 관리합니다. 단일 예약, 취소, 다중 예약, 대기자 인계를 구현합니다.
-- **RequestQueue.java**: 요청 FIFO Queue를 구현합니다. 빈 Queue와 가득 찬 Queue는 Condition Variable로 대기하고, 종료 시 대기자를 깨웁니다. 현재·최대 길이를 기록합니다.
+- **BoundedRequestQueue.java**: 요청 FIFO Queue를 구현합니다. 빈 Queue와 가득 찬 Queue는 Condition Variable로 대기하고, 종료 시 대기자를 깨웁니다. 현재·최대 길이를 기록합니다.
 - **Worker.java**: 10개 Worker가 요청을 꺼내 SeatManager에 전달합니다. 좌석 Lock 해제 후 응답·통지 적재·로그 기록을 수행합니다.
 - **Notifier.java**: 통지 Queue와 CV를 관리합니다. 대기자에게 NOTIFY를 보내고 등록부터 통지 송신까지의 대기시간을 기록합니다.
 
@@ -110,7 +110,7 @@ Client 상태:
 - **Monitor.java**: 5초마다 전체 좌석 현황·Queue 길이·누적 처리 수를 출력합니다. Queue에 요청이 있는데 30초간 처리 진전이 없으면 Deadlock 의심을 기록합니다.
 
 좌석 기능 없는 echo로 접속·메시지 분할/병합·부분 쓰기를 먼저 검사할 수 있습니다.
-Interfaces.RequestQueue·Seats·ServerContext 계약에 맞춰 연결하고 원격 접속 확인을 지원합니다.
+RequestQueue·Seats·ServerContext 계약에 맞춰 연결하고 원격 접속 확인을 지원합니다.
 
 완료 확인:
 
@@ -154,25 +154,30 @@ Interfaces.RequestQueue·Seats·ServerContext 계약에 맞춰 연결하고 원�
 
 | 구현 클래스 | 구현할 interface | 주요 책임 |
 | --- | --- | --- |
-| Server | `Interfaces.ServerContext` | 연결 등록·조회, 첫 응답·통지·정지 감시 집계, 실패 전달 |
-| RequestQueue | `Interfaces.RequestQueue` | put/take/close/snapshot |
-| SeatManager | `Interfaces.Seats` | handle/snapshot/metrics |
-| ClientConnection | `Interfaces.Connection` | clientId/bindClientId/send/close |
-| Notifier | `Interfaces.Notifications` | submit/finish/run |
-| Listener, Monitor | `Interfaces.Stoppable` | run/stop |
-| Log | `Interfaces.Logger` | write/close |
+| Server | `ServerContext` | 연결 등록·조회, 첫 응답·통지·정지 감시 집계, 실패 전달 |
+| BoundedRequestQueue | `RequestQueue` | put/take/close/snapshot |
+| SeatManager | `Seats` | handle/snapshot/metrics |
+| ClientConnection | `Connection` | clientId/bindClientId/send/close |
+| Notifier | `Notifications` | submit/finish/run |
+| Listener, Monitor | `Stoppable` | run/stop |
+| Log | `Logger` | write/close |
 
 메서드의 반환값·예외·종료 조건은 소스 주석을 따릅니다. 각 담당은 상대 구현 클래스 대신 위 interface를 생성자 인자로 받아 임시 대역으로도 확인할 수 있습니다.
 
 ```java
+import cwnu.dchw2.common.Interfaces.Result;
+import cwnu.dchw2.common.Interfaces.Task;
+import cwnu.dchw2.common.Protocol;
+import cwnu.dchw2.common.Protocol.Request;
+
 // Listener의 수신 처리: 연결 등록과 완성된 줄 조립이 끝난 뒤
-Protocol.Request request = Protocol.decodeRequest(line, connection.clientId());
-queue.put(new Interfaces.Task(request, connection));
+Request request = Protocol.decodeRequest(line, connection.clientId());
+queue.put(new Task(request, connection));
 
 // Worker의 처리: 여기의 queue/seats/notifier/server/log는 제공된 interface 타입
-Interfaces.Task task = queue.take();
+Task task = queue.take();
 if (task != null) {
-    Interfaces.Result result = seats.handle(task.request);
+    Result result = seats.handle(task.request);
     if (result.notice != null) {
         notifier.submit(result.notice);
     }
@@ -187,24 +192,29 @@ if (task != null) {
 생성자 형태는 다음으로 맞춥니다.
 
 ```text
-Listener(Interfaces.ServerContext server, Interfaces.RequestQueue queue,
-         Interfaces.Logger log, String bindHost, int port)
+Listener(ServerContext server, RequestQueue queue,
+         Logger log, String bindHost, int port)
 ClientConnection(SocketChannel channel)
-Monitor(Interfaces.ServerContext server, Interfaces.RequestQueue queue,
-        Interfaces.Seats seats, Interfaces.Logger log)
+Monitor(ServerContext server, RequestQueue queue,
+        Seats seats, Logger log)
 Log(String node, Path file) throws IOException
 ```
 
 Protocol만 사용하는 Client 예시:
 
 ```java
-Protocol.Request request = new Protocol.Request(
+import cwnu.dchw2.common.Protocol;
+import cwnu.dchw2.common.Protocol.Request;
+import cwnu.dchw2.common.Protocol.Response;
+import java.util.List;
+
+Request request = new Request(
     7, 12, Protocol.RESERVE, List.of(42)
 );
 String line = Protocol.encodeRequest(request); // "1001 12 42"
 // pending 등록·송신 시각 기록 후, Client 송신 담당이 LF를 붙여 전송
 
-Protocol.Response reply = Protocol.decodeResponse("2000 12 3002 42 TAKEN");
+Response reply = Protocol.decodeResponse("2000 12 3002 42 TAKEN");
 switch (reply.type) {
     case Protocol.RESP:
         // reply.requestId로 pending을 찾아 첫 응답과 상태 처리
@@ -294,7 +304,7 @@ javac --release 17 -encoding UTF-8 -d out src/cwnu/dchw2/common/Protocol.java sr
 - 팀장 핵심 코드는 조원 클래스 없이도 컴파일됩니다. Server.main은 아래 지정된 생성자의 조원 클래스를 reflection으로 연결합니다. reflection은 진입점 구성에만 사용하며 요청 처리에는 사용하지 않습니다. 조원 클래스가 없으면 클래스 누락을 표시하고 종료 코드 1로 끝납니다. out의 class 파일과 실행 로그는 GitHub에 올리지 않습니다.
 
 ```text
-javac --release 17 -encoding UTF-8 -Xlint:all -d out src/cwnu/dchw2/common/Protocol.java src/cwnu/dchw2/common/Interfaces.java src/cwnu/dchw2/server/Server.java src/cwnu/dchw2/server/SeatManager.java src/cwnu/dchw2/server/RequestQueue.java src/cwnu/dchw2/server/Worker.java src/cwnu/dchw2/server/Notifier.java
+javac --release 17 -encoding UTF-8 -Xlint:all -d out src/cwnu/dchw2/common/Protocol.java src/cwnu/dchw2/common/Interfaces.java src/cwnu/dchw2/server/Server.java src/cwnu/dchw2/server/SeatManager.java src/cwnu/dchw2/server/BoundedRequestQueue.java src/cwnu/dchw2/server/Worker.java src/cwnu/dchw2/server/Notifier.java
 ```
 - Server와 ClientMain의 실행 인자 순서는 다음으로 고정합니다. 세 인자를 모두 받으며 주소·포트·개발용 요청 수를 소스에 고정하지 않습니다.
 
@@ -312,20 +322,20 @@ ClientMain <serverHost> <port> <client당 요청 수>
 
 ## 팀장 핵심의 연결 방법
 
-Protocol.java·Interfaces.java는 변경하지 않았습니다. 생성자·추가 조회 메서드는 팀장 클래스 안에 있으며 기존 파트 간 인터페이스를 유지합니다.
+공통 인터페이스의 이름·메서드·메시지 형식은 유지했습니다. 구현 `RequestQueue.java`를 용량 제한을 드러내는 `BoundedRequestQueue.java`로 변경해 interface `RequestQueue`와의 이름 충돌을 없앴습니다. `Interfaces.java`는 Request·Response import만 정리했으며, 나머지 중첩 타입도 각 소스 상단에서 명시적으로 import해 본문에는 단순 이름을 사용합니다. 조원 코드는 공통 interface 생성자를 그대로 쓰며, 구현 객체를 직접 만들 때만 `new BoundedRequestQueue(...)`로 변경합니다.
 
 | 클래스 | 생성자 또는 연결 메서드 | 책임 |
 | --- | --- | --- |
-| Server | `Server(int requestsPerClient, Interfaces.Logger log)` | 실제 SeatManager·RequestQueue·Worker 10개·Notifier 연결 |
-| Server | `Server(int requestsPerClient, Interfaces.Logger log, Interfaces.Seats seats)` | 독립 검증에서 Seats 대역 주입 |
+| Server | `Server(int requestsPerClient, Logger log)` | 실제 SeatManager·BoundedRequestQueue·Worker 10개·Notifier 연결 |
+| Server | `Server(int requestsPerClient, Logger log, Seats seats)` | 독립 검증에서 Seats 대역 주입 |
 | Server | `queue()`, `seats()` | Listener·Monitor에 전달할 interface 반환 |
-| Server | `run(Interfaces.Stoppable listener, Interfaces.Stoppable monitor)` | 호출 스레드에서 Listener 실행, 모든 정리 후 성공 여부 반환. Logger 닫기 책임도 Server가 소유 |
+| Server | `run(Stoppable listener, Stoppable monitor)` | 호출 스레드에서 Listener 실행, 모든 정리 후 성공 여부 반환. Logger 닫기 책임도 Server가 소유 |
 | Server | `failure()`, `statistics()` | 첫 실패 원인과 Client별 응답 수·통지 수·처리량·평균 대기시간·정지 감시 집계 조회 |
 | SeatManager | `SeatManager()` | EMPTY 좌석 100개와 좌석별 ReentrantLock·FIFO ArrayDeque 초기화 |
-| RequestQueue | `RequestQueue()` | 용량 1024, notEmpty/notFull Condition 대기, close 후 잔여 drain |
-| RequestQueue | `RequestQueue(int capacity)` | 포화 검증용 작은 용량 지정 |
-| Worker | `Worker(Interfaces.RequestQueue queue, Interfaces.Seats seats, Interfaces.Notifications notifier, Interfaces.ServerContext server, Interfaces.Logger log)` | 요청 처리·통지 적재·첫 응답 송신·로그 |
-| Notifier | `Notifier(Interfaces.ServerContext server, Interfaces.Logger log)` | 통지 Queue와 Condition, 성공 송신 후 대기시간 집계 |
+| BoundedRequestQueue | `BoundedRequestQueue()` | 용량 1024, notEmpty/notFull Condition 대기, close 후 잔여 drain |
+| BoundedRequestQueue | `BoundedRequestQueue(int capacity)` | 포화 검증용 작은 용량 지정 |
+| Worker | `Worker(RequestQueue queue, Seats seats, Notifications notifier, ServerContext server, Logger log)` | 요청 처리·통지 적재·첫 응답 송신·로그 |
+| Notifier | `Notifier(ServerContext server, Logger log)` | 통지 Queue와 Condition, 성공 송신 후 대기시간 집계 |
 
 `Server.run`은 한 번만 호출합니다. 정상 종료는 `RequestQueue.close`로 Worker를 깨우고 잔여 요청을 처리합니다. Worker join 후 `Notifier.finish`를 호출하며 Notifier join은 진행 중 send와 마지막 로그 기록까지 기다립니다. 그 뒤 BYE를 보내고 Monitor를 stop·interrupt·join한 다음 최종 좌석을 검사하고 자원을 닫습니다. Queue가 비었거나 첫 응답 카운트에 도달했다는 이유만으로 join을 생략하지 않습니다.
 
@@ -343,7 +353,7 @@ java -cp out cwnu.dchw2.server.Server 0.0.0.0 12345 10
 
 ## 실제 구현·검증 결과와 한계
 
-Windows의 JDK 21.0.6에서 `javac --release 17 -encoding UTF-8 -Xlint:all` 컴파일 경고·오류 0건, 핵심 독립 검증 22개와 별도 JVM 진입점 검증 8개가 통과했습니다. 이는 팀장 핵심 구현과 대역 연결 결과이며 원격 정식 부하의 실측 결과가 아닙니다. 검증 소스와 임시 대역은 로컬 `Sol Session/verification`에 보관하고 GitHub에는 팀장 5개 소스와 이 README의 변경만 반영합니다.
+Windows의 JDK 21.0.6에서 `javac --release 17 -encoding UTF-8 -Xlint:all` 컴파일 경고·오류 0건, 핵심 독립 검증 22개와 별도 JVM 진입점 검증 8개가 통과했습니다. 이는 팀장 핵심 구현과 대역 연결 결과이며 원격 정식 부하의 실측 결과가 아닙니다. 검증 소스와 임시 대역은 로컬 `Sol Session/verification`에 보관하고 GitHub에는 팀장 소스 5개·Interfaces.java의 import 정리·이 README의 변경만 반영합니다.
 
 | 구분 | 실제 확인 범위 | 결과 |
 | --- | --- | --- |

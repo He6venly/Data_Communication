@@ -1,7 +1,12 @@
 package cwnu.dchw2.server;
 
-import cwnu.dchw2.common.Interfaces;
+import cwnu.dchw2.common.Interfaces.Result;
+import cwnu.dchw2.common.Interfaces.SeatMetrics;
+import cwnu.dchw2.common.Interfaces.SeatView;
+import cwnu.dchw2.common.Interfaces.Seats;
+import cwnu.dchw2.common.Interfaces.WaitNotice;
 import cwnu.dchw2.common.Protocol;
+import cwnu.dchw2.common.Protocol.Request;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -12,7 +17,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantLock;
 
 /** 상태 판정만 수행한다. detail도 Lock 안에서 캡처하고 I/O는 호출자에게 맡긴다. */
-public final class SeatManager implements Interfaces.Seats {
+public final class SeatManager implements Seats {
     private static final class Seat {
         final ReentrantLock lock = new ReentrantLock();
         final ArrayDeque<WaitEntry> waiting = new ArrayDeque<>();
@@ -25,7 +30,7 @@ public final class SeatManager implements Interfaces.Seats {
         final int requestId;
         final long registeredNanos;
 
-        WaitEntry(Protocol.Request request) {
+        WaitEntry(Request request) {
             clientId = request.clientId;
             requestId = request.requestId;
             registeredNanos = System.nanoTime();
@@ -46,7 +51,7 @@ public final class SeatManager implements Interfaces.Seats {
     }
 
     @Override
-    public Interfaces.Result handle(Protocol.Request request) {
+    public Result handle(Request request) {
         if (request.clientId < 1 || request.clientId > Protocol.CLIENT_COUNT
                 || request.requestId < 1) {
             throw new IllegalArgumentException("Client 번호 또는 요청 번호가 잘못되었습니다.");
@@ -84,7 +89,7 @@ public final class SeatManager implements Interfaces.Seats {
             int waitingBefore = seat.waiting.size();
             int status;
             String reason;
-            Interfaces.WaitNotice notice = null;
+            WaitNotice notice = null;
             if (request.command == Protocol.RESERVE) {
                 if (seat.owner == 0) {
                     assign(seat, request.clientId);
@@ -111,7 +116,7 @@ public final class SeatManager implements Interfaces.Seats {
                 WaitEntry head = seat.waiting.pollFirst();
                 if (head != null) {
                     assign(seat, head.clientId);
-                    notice = new Interfaces.WaitNotice(head.clientId, head.requestId,
+                    notice = new WaitNotice(head.clientId, head.requestId,
                             number, head.registeredNanos);
                 }
                 status = Protocol.SUCCESS;
@@ -128,7 +133,7 @@ public final class SeatManager implements Interfaces.Seats {
         }
     }
 
-    private Interfaces.Result reserveMulti(Protocol.Request request) {
+    private Result reserveMulti(Request request) {
         List<Integer> order = new ArrayList<>(request.seats);
         Collections.sort(order);
         int acquired = 0;
@@ -199,32 +204,32 @@ public final class SeatManager implements Interfaces.Seats {
                 + ",waitingBefore=" + waitingBefore + ",waitingAfter=" + seat.waiting.size();
     }
 
-    private static Interfaces.Result result(Protocol.Request request, int status,
-            String reason, Interfaces.WaitNotice notice, String detail) {
-        return new Interfaces.Result(Protocol.response(request, status, reason), notice, detail);
+    private static Result result(Request request, int status,
+            String reason, WaitNotice notice, String detail) {
+        return new Result(Protocol.response(request, status, reason), notice, detail);
     }
 
     @Override
-    public List<Interfaces.SeatView> snapshot() {
-        List<Interfaces.SeatView> copy = new ArrayList<>(seats.length);
+    public List<SeatView> snapshot() {
+        List<SeatView> copy = new ArrayList<>(seats.length);
         for (int i = 0; i < seats.length; i++) {
             Seat seat = seats[i];
             if (seat.lock.tryLock()) {
                 try {
-                    copy.add(new Interfaces.SeatView(i + 1, seat.owner, seat.waiting.size(), true));
+                    copy.add(new SeatView(i + 1, seat.owner, seat.waiting.size(), true));
                 } finally {
                     seat.lock.unlock();
                 }
             } else {
-                copy.add(new Interfaces.SeatView(i + 1, -1, -1, false));
+                copy.add(new SeatView(i + 1, -1, -1, false));
             }
         }
         return List.copyOf(copy);
     }
 
     @Override
-    public Interfaces.SeatMetrics metrics() {
-        return new Interfaces.SeatMetrics(assignments.get(), releases.get(), contention.get(),
+    public SeatMetrics metrics() {
+        return new SeatMetrics(assignments.get(), releases.get(), contention.get(),
                 doubleBookings.get(), waitlisted.get());
     }
 }

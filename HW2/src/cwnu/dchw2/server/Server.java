@@ -1,6 +1,13 @@
 package cwnu.dchw2.server;
 
-import cwnu.dchw2.common.Interfaces;
+import cwnu.dchw2.common.Interfaces.Connection;
+import cwnu.dchw2.common.Interfaces.Logger;
+import cwnu.dchw2.common.Interfaces.RequestQueue;
+import cwnu.dchw2.common.Interfaces.SeatMetrics;
+import cwnu.dchw2.common.Interfaces.SeatView;
+import cwnu.dchw2.common.Interfaces.Seats;
+import cwnu.dchw2.common.Interfaces.ServerContext;
+import cwnu.dchw2.common.Interfaces.Stoppable;
 import cwnu.dchw2.common.Protocol;
 import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
@@ -11,22 +18,22 @@ import java.util.Objects;
 import java.util.concurrent.atomic.AtomicReference;
 
 /** Listener는 run을 호출한 스레드, 나머지는 고정 Worker 10 + Notifier 1 + Monitor 1이다. */
-public final class Server implements Interfaces.ServerContext {
+public final class Server implements ServerContext {
     private final Object stateLock = new Object();
     private final int requestsPerClient;
     private final int expectedResponses;
-    private final Interfaces.Logger log;
-    private final Interfaces.Seats seats;
-    private final RequestQueue queue = new RequestQueue();
+    private final Logger log;
+    private final Seats seats;
+    private final BoundedRequestQueue queue = new BoundedRequestQueue();
     private final Notifier notifier;
-    private final Interfaces.Connection[] clients = new Interfaces.Connection[Protocol.CLIENT_COUNT];
+    private final Connection[] clients = new Connection[Protocol.CLIENT_COUNT];
     private final boolean[] connectionClosed = new boolean[Protocol.CLIENT_COUNT];
     private final int[] responses = new int[Protocol.CLIENT_COUNT];
     private final Worker[] workers = new Worker[Protocol.WORKER_COUNT];
     private final Thread[] workerThreads = new Thread[Protocol.WORKER_COUNT];
     private final AtomicReference<Throwable> failure = new AtomicReference<>();
-    private volatile Interfaces.Stoppable listener;
-    private volatile Interfaces.Stoppable monitor;
+    private volatile Stoppable listener;
+    private volatile Stoppable monitor;
     private volatile Thread monitorThread;
     private volatile Thread notifierThread;
     private volatile boolean inputStopped;
@@ -40,12 +47,12 @@ public final class Server implements Interfaces.ServerContext {
     private long totalWaitNanos;
     private long suspicions;
 
-    public Server(int requestsPerClient, Interfaces.Logger log) {
+    public Server(int requestsPerClient, Logger log) {
         this(requestsPerClient, log, new SeatManager());
     }
 
     /** 조원 대역과 최종 검사 시점 검증을 위한 인터페이스 주입 경로다. */
-    public Server(int requestsPerClient, Interfaces.Logger log, Interfaces.Seats seats) {
+    public Server(int requestsPerClient, Logger log, Seats seats) {
         if (requestsPerClient < 1 || requestsPerClient > Integer.MAX_VALUE / Protocol.CLIENT_COUNT) {
             throw new IllegalArgumentException("Client당 요청 수가 유효한 양수 범위를 벗어났습니다.");
         }
@@ -61,11 +68,11 @@ public final class Server implements Interfaces.ServerContext {
         notifierThread = new Thread(notifier, "Notifier");
     }
 
-    public Interfaces.RequestQueue queue() {
+    public RequestQueue queue() {
         return queue;
     }
 
-    public Interfaces.Seats seats() {
+    public Seats seats() {
         return seats;
     }
 
@@ -74,7 +81,7 @@ public final class Server implements Interfaces.ServerContext {
     }
 
     /** 한 실행만 지원한다. 반환할 때 소켓·실행 스레드·Logger 정리를 완료한다. */
-    public boolean run(Interfaces.Stoppable listener, Interfaces.Stoppable monitor) {
+    public boolean run(Stoppable listener, Stoppable monitor) {
         Objects.requireNonNull(listener, "listener");
         Objects.requireNonNull(monitor, "monitor");
         synchronized (stateLock) {
@@ -118,14 +125,14 @@ public final class Server implements Interfaces.ServerContext {
     }
 
     @Override
-    public void registerClient(int clientId, Interfaces.Connection connection) {
+    public void registerClient(int clientId, Connection connection) {
         checkClientId(clientId);
         Objects.requireNonNull(connection, "connection");
         synchronized (stateLock) {
             if (inputStopped || clients[clientId - 1] != null || connection.clientId() != 0) {
                 throw new IllegalArgumentException("종료 중이거나 중복 등록된 연결입니다.");
             }
-            for (Interfaces.Connection existing : clients) {
+            for (Connection existing : clients) {
                 if (existing == connection) {
                     throw new IllegalArgumentException("같은 연결을 다시 등록할 수 없습니다.");
                 }
@@ -145,7 +152,7 @@ public final class Server implements Interfaces.ServerContext {
     }
 
     @Override
-    public Interfaces.Connection findClient(int clientId) {
+    public Connection findClient(int clientId) {
         if (clientId < 1 || clientId > clients.length) {
             return null;
         }
@@ -227,7 +234,7 @@ public final class Server implements Interfaces.ServerContext {
     private void stopInput() {
         inputStopped = true;
         queue.close();
-        Interfaces.Stoppable current = listener;
+        Stoppable current = listener;
         if (current != null) {
             try {
                 current.stop();
@@ -239,7 +246,7 @@ public final class Server implements Interfaces.ServerContext {
 
     private void stopMonitor() {
         monitorStopping = true;
-        Interfaces.Stoppable current = monitor;
+        Stoppable current = monitor;
         if (current != null) {
             try {
                 current.stop();
@@ -269,7 +276,7 @@ public final class Server implements Interfaces.ServerContext {
                 if (completed != expectedResponses) {
                     throw new IllegalStateException("첫 응답 수가 목표와 다릅니다.");
                 }
-                for (Interfaces.Connection connection : registeredConnections()) {
+                for (Connection connection : registeredConnections()) {
                     connection.send(Protocol.encodeResponse(Protocol.bye()));
                 }
             } catch (IOException | RuntimeException e) {
@@ -320,10 +327,10 @@ public final class Server implements Interfaces.ServerContext {
         return interrupted;
     }
 
-    private List<Interfaces.Connection> registeredConnections() {
+    private List<Connection> registeredConnections() {
         synchronized (stateLock) {
-            List<Interfaces.Connection> copy = new ArrayList<>();
-            for (Interfaces.Connection connection : clients) {
+            List<Connection> copy = new ArrayList<>();
+            for (Connection connection : clients) {
                 if (connection != null) {
                     copy.add(connection);
                 }
@@ -333,7 +340,7 @@ public final class Server implements Interfaces.ServerContext {
     }
 
     private void closeConnections() {
-        List<Interfaces.Connection> toClose = new ArrayList<>();
+        List<Connection> toClose = new ArrayList<>();
         synchronized (stateLock) {
             for (int i = 0; i < clients.length; i++) {
                 if (clients[i] != null && !connectionClosed[i]) {
@@ -342,7 +349,7 @@ public final class Server implements Interfaces.ServerContext {
                 }
             }
         }
-        for (Interfaces.Connection connection : toClose) {
+        for (Connection connection : toClose) {
             try {
                 connection.close();
             } catch (IOException | RuntimeException e) {
@@ -354,7 +361,7 @@ public final class Server implements Interfaces.ServerContext {
     private void writeFinalState() throws IOException {
         int reserved = 0;
         int unresolved = 0;
-        for (Interfaces.SeatView seat : seats.snapshot()) {
+        for (SeatView seat : seats.snapshot()) {
             if (!seat.readable) {
                 throw new IllegalStateException("Worker 종료 후 읽지 못한 좌석입니다: " + seat.seat);
             }
@@ -363,7 +370,7 @@ public final class Server implements Interfaces.ServerContext {
             log.write("POOL", "INFO", "final=true seat=" + seat.seat
                     + " ownerId=" + seat.ownerId + " waitingCount=" + seat.waitingCount);
         }
-        Interfaces.SeatMetrics metrics = seats.metrics();
+        SeatMetrics metrics = seats.metrics();
         Statistics stats = statistics();
         boolean valid = metrics.doubleBookings == 0
                 && metrics.assignments - metrics.releases == reserved
@@ -425,7 +432,7 @@ public final class Server implements Interfaces.ServerContext {
 
     /** 조원 클래스는 아직 없어도 핵심 소스가 컴파일되도록 진입점에서만 연결한다. */
     public static void main(String[] args) {
-        Interfaces.Logger log = null;
+        Logger log = null;
         boolean runOwnsLog = false;
         try {
             if (args.length != 3 || args[0].isBlank()) {
@@ -437,16 +444,16 @@ public final class Server implements Interfaces.ServerContext {
                     || requests > Integer.MAX_VALUE / Protocol.CLIENT_COUNT) {
                 throw new IllegalArgumentException("포트 또는 요청 수가 유효 범위를 벗어났습니다.");
             }
-            log = create(Interfaces.Logger.class, "cwnu.dchw2.common.Log",
+            log = create(Logger.class, "cwnu.dchw2.common.Log",
                     new Class<?>[] {String.class, Path.class}, "SERVER", Path.of("logs", "Server.txt"));
             Server server = new Server(requests, log);
-            Interfaces.Stoppable listener = create(Interfaces.Stoppable.class,
-                    "cwnu.dchw2.server.Listener", new Class<?>[] {Interfaces.ServerContext.class,
-                            Interfaces.RequestQueue.class, Interfaces.Logger.class, String.class, int.class},
+            Stoppable listener = create(Stoppable.class,
+                    "cwnu.dchw2.server.Listener", new Class<?>[] {ServerContext.class,
+                            RequestQueue.class, Logger.class, String.class, int.class},
                     server, server.queue(), log, args[0], port);
-            Interfaces.Stoppable monitor = create(Interfaces.Stoppable.class,
-                    "cwnu.dchw2.server.Monitor", new Class<?>[] {Interfaces.ServerContext.class,
-                            Interfaces.RequestQueue.class, Interfaces.Seats.class, Interfaces.Logger.class},
+            Stoppable monitor = create(Stoppable.class,
+                    "cwnu.dchw2.server.Monitor", new Class<?>[] {ServerContext.class,
+                            RequestQueue.class, Seats.class, Logger.class},
                     server, server.queue(), server.seats(), log);
             runOwnsLog = true;
             if (!server.run(listener, monitor)) {

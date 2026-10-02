@@ -1,21 +1,28 @@
 package cwnu.dchw2.server;
 
-import cwnu.dchw2.common.Interfaces;
+import cwnu.dchw2.common.Interfaces.Logger;
+import cwnu.dchw2.common.Interfaces.Notifications;
+import cwnu.dchw2.common.Interfaces.RequestQueue;
+import cwnu.dchw2.common.Interfaces.Result;
+import cwnu.dchw2.common.Interfaces.Seats;
+import cwnu.dchw2.common.Interfaces.ServerContext;
+import cwnu.dchw2.common.Interfaces.Task;
 import cwnu.dchw2.common.Protocol;
+import cwnu.dchw2.common.Protocol.Request;
 import java.io.IOException;
 import java.util.StringJoiner;
 
 public final class Worker implements Runnable {
-    private final Interfaces.RequestQueue queue;
-    private final Interfaces.Seats seats;
-    private final Interfaces.Notifications notifier;
-    private final Interfaces.ServerContext server;
-    private final Interfaces.Logger log;
+    private final RequestQueue queue;
+    private final Seats seats;
+    private final Notifications notifier;
+    private final ServerContext server;
+    private final Logger log;
     private volatile boolean abortRequested;
 
-    public Worker(Interfaces.RequestQueue queue, Interfaces.Seats seats,
-            Interfaces.Notifications notifier, Interfaces.ServerContext server,
-            Interfaces.Logger log) {
+    public Worker(RequestQueue queue, Seats seats,
+            Notifications notifier, ServerContext server,
+            Logger log) {
         this.queue = queue;
         this.seats = seats;
         this.notifier = notifier;
@@ -32,15 +39,15 @@ public final class Worker implements Runnable {
     public void run() {
         try {
             while (!abortRequested) {
-                Interfaces.Task task = queue.take();
+                Task task = queue.take();
                 if (task == null || abortRequested) {
                     return;
                 }
-                Protocol.Request request = task.request;
+                Request request = task.request;
                 String event = Protocol.commandName(request.command);
                 String fields = fields(request);
                 log.write(event, "INFO", fields + " result=REQUEST");
-                Interfaces.Result result = seats.handle(request);
+                Result result = seats.handle(request);
                 // handle는 모든 좌석 Lock을 풀고 반환한다. 통지가 RESP보다 먼저 갈 수 있다.
                 if (result.notice != null) {
                     notifier.submit(result.notice);
@@ -67,7 +74,7 @@ public final class Worker implements Runnable {
         }
     }
 
-    static String fields(Protocol.Request request) {
+    static String fields(Request request) {
         StringJoiner seatText = new StringJoiner(",");
         for (int seat : request.seats) {
             seatText.add(Integer.toString(seat));
