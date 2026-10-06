@@ -19,12 +19,13 @@ public final class ClientMain {
         BlockingQueue<Client> ended = new LinkedBlockingQueue<>();
         Throwable failure = null;
         boolean interrupted = false;
+        int requests = 0;
         try {
             if (args.length != 3 || args[0].isBlank()) {
                 throw new IllegalArgumentException("사용법: ClientMain <serverHost> <port> <Client당 요청 수>");
             }
             int port = Integer.parseInt(args[1]);
-            int requests = Integer.parseInt(args[2]);
+            requests = Integer.parseInt(args[2]);
             if (port < 1 || port > 65535 || requests < 1
                     || requests > Integer.MAX_VALUE / Protocol.CLIENT_COUNT) {
                 throw new IllegalArgumentException("포트 또는 요청 수가 유효 범위를 벗어났습니다.");
@@ -114,9 +115,31 @@ public final class ClientMain {
             popular += state.popularSeats;
         }
         double ratio = selected == 0 ? 0 : (double) popular / selected;
+        String condition = popularCondition(requests, clients.size(), sent, responses, selected, popular);
         System.out.println("Client " + clients.size() + "개 종료: sent=" + sent
                 + " firstResponses=" + responses + " notifyReceived=" + notifications
+                + " requestsPerClient=" + requests
+                + " selectedSeats=" + selected + " popularSeats=" + popular
                 + " popularSeatRatio=" + ratio
-                + " popularCondition=" + (ratio >= 0.5 ? "PASS" : "BELOW_HALF"));
+                + " popularCondition=" + condition);
+        if (condition.equals("BELOW_HALF")) {
+            System.err.println("과제 조건 미달: 정식 실행의 인기 좌석 선택 비율이 절반 미만입니다."
+                    + " selectedSeats=" + selected + " popularSeats=" + popular
+                    + " popularSeatRatio=" + ratio);
+            System.exit(1);
+        }
+    }
+
+    /** Client 30명의 정식 요청 완료 후 전체 선택 수로 판정한다. 축소 실행은 실측만 한다. */
+    static String popularCondition(int requestsPerClient, int clientCount, int sent,
+            int firstResponses, long selectedSeats, long popularSeats) {
+        int expected = Protocol.CLIENT_COUNT * Protocol.REQUESTS_PER_CLIENT;
+        if (requestsPerClient != Protocol.REQUESTS_PER_CLIENT
+                || clientCount != Protocol.CLIENT_COUNT || sent != expected || firstResponses != expected) {
+            return "NOT_EVALUATED";
+        }
+        // CANCEL과 MULTI의 모든 좌석을 포함하며, 정확히 절반인 경우도 통과한다.
+        return selectedSeats > 0 && popularSeats >= selectedSeats / 2 + selectedSeats % 2
+                ? "PASS" : "BELOW_HALF";
     }
 }
