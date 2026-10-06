@@ -1,7 +1,7 @@
 # HW2 — Thread Pool 기반 실시간 좌석 예매 시스템
 
 Java로 좌석 100개를 관리하는 원격 서버와 로컬 Client 30개를 구현합니다.
-Protocol.java와 Interfaces.java를 팀장이 제공하며, 팀장 담당 Server·SeatManager·BoundedRequestQueue·Worker·Notifier의 구현과 독립 검증을 완료했습니다. Client·Log·Listener·ClientConnection·Monitor는 각 담당이 구현합니다. 각 담당은 담당 파트 전체를 독립적으로 구현·검증하고, 팀장이 결과를 받아 리팩토링·통합합니다.
+Protocol.java와 Interfaces.java는 팀장이 제공합니다. 각 담당은 담당 파트 전체를 독립적으로 구현·검증하고, 팀장이 결과를 받아 리팩토링·통합합니다.
 
 ## 개발 범위와 보고서 메모
 
@@ -10,6 +10,14 @@ Protocol.java와 Interfaces.java를 팀장이 제공하며, 팀장 담당 Server
 - 개선을 시도하다 복잡성이나 한계로 단순한 방법을 선택한 경우, 그 과정과 최종 선택의 이유를 보고서에 기록합니다.
 - 기록은 **개선하려던 점 → 시도한 방법 → 발생한 문제 → 최종 선택과 이유 → 확인 결과** 순으로 작성합니다.
 - 검토만 한 내용과 실제 구현·실험한 내용을 구분합니다. 아직 시도하지 않은 개선을 실패한 경험으로 미리 작성하지 않습니다.
+
+### Client의 같은 좌석 중첩 요청 제한 — 보고서 메모
+
+- **애로사항**: 같은 좌석에 예약·취소 요청을 겹쳐 보내면 RESP와 NOTIFY의 도착 순서에 따라 보유·대기 상태를 갱신하기 복잡해집니다. 모든 순서를 처리하는 상태 관리에는 구현·검증 부담이 있습니다.
+- **선택한 방식**: 첫 응답을 기다리는 pending 좌석은 새 요청 후보에서 제외합니다. 100석 모두 pending일 때만 송신을 조건 대기하고, 응답 처리로 후보가 생기면 다시 보냅니다. 송신·수신은 별도 흐름으로 유지합니다.
+- **대기 등록과 구분**: WAITLISTED 첫 응답을 받으면 pending 제한을 해제합니다. 좌석 배정을 기다리는 waitlist 때문에 송신을 멈추는 방식은 아닙니다.
+- **선택 이유와 한계**: 학부 프로젝트 범위에서 상태 처리의 복잡성을 줄이는 선택입니다. 다만 모든 좌석이 pending이면 응답을 기다리므로, PDF의 이전 응답을 기다리지 않는 요청 생성 조건을 모든 상황에서 충족한다고 단정하지 않습니다.
+- **보고서 작성**: 위 애로사항과 단순화 이유를 설명합니다. 중첩 요청 허용을 실제 구현하다 실패했다는 서술은 해당 시도·문제·변경 기록이 있을 때만 추가합니다. 전체 pending 대기의 발생 여부와 영향도 실측한 경우에만 결과로 적습니다.
 
 ## 파일 구성
 
@@ -37,7 +45,7 @@ HW2/
       └─ Log.java
 ```
 
-공통 인터페이스 파일 하나를 추가해 총 13개 Java 파일로 구성합니다. 현재 소스는 공통 코드 2개와 팀장 서버 핵심 5개이며, 나머지 6개는 담당별 구현 예정입니다.
+총 13개 Java 파일로 구성합니다.
 Request·Response는 Protocol 내부 일반 클래스, Task·Result·WaitNotice·조회용 데이터는 Interfaces 내부 일반 클래스입니다. Seat·WaitEntry는 SeatManager 내부에 둡니다. record·enum 없이 public final 필드와 숫자 상수·switch를 사용합니다.
 설정·통계·종료·요청 생성은 관련 클래스의 메서드로 작성합니다.
 
@@ -45,8 +53,8 @@ Request·Response는 Protocol 내부 일반 클래스, Task·Result·WaitNotice�
 
 담당 패키지: `cwnu.dchw2.server`, 공통 계약은 `cwnu.dchw2.common`
 
-- **Protocol.java — 제공 완료**: 숫자 상수, 요청·응답 데이터, 메시지 인코딩·해석을 제공합니다.
-- **Interfaces.java — 제공 완료**: 파트 사이 메서드와 공유 데이터를 제공합니다. 변경은 팀장이 관리합니다.
+- **Protocol.java**: 숫자 상수, 요청·응답 데이터, 메시지 인코딩·해석을 제공합니다.
+- **Interfaces.java**: 파트 사이 메서드와 공유 데이터를 제공합니다. 변경은 팀장이 관리합니다.
 - **Server.java**: 실행 인자로 주소·포트·개발용 요청 건수를 받고 서버 구성요소를 연결합니다. Worker 10개를 시작하고 누적 통계와 정상 종료를 관리합니다.
 - **SeatManager.java**: 좌석 100개를 EMPTY로 초기화하고 좌석별 Lock·owner·FIFO waitlist를 관리합니다. 단일 예약, 취소, 다중 예약, 대기자 인계를 구현합니다.
 - **BoundedRequestQueue.java**: 요청 FIFO Queue를 구현합니다. 빈 Queue와 가득 찬 Queue는 Condition Variable로 대기하고, 종료 시 대기자를 깨웁니다. 현재·최대 길이를 기록합니다.
@@ -56,7 +64,7 @@ Request·Response는 Protocol 내부 일반 클래스, Task·Result·WaitNotice�
 통신 없이 요청 객체를 넣어 단일 예약·MULTI·FIFO부터 검사할 수 있습니다.
 팀장이 메시지·데이터 타입·메서드 인자와 반환값·로그·종료 규약을 확정해 전달합니다. 각 파트의 결과를 받은 뒤 규약 준수 여부를 확인하고, 필요한 리팩토링·연결 수정과 전체 통합 검증을 수행합니다.
 
-완료 확인:
+검증 기준:
 
 - 같은 좌석의 이중예약 없음.
 - MULTI는 2~4석, 오름차순 Lock, 전부 성공 또는 전부 실패.
@@ -73,7 +81,7 @@ Request·Response는 Protocol 내부 일반 클래스, Task·Result·WaitNotice�
 
 요청 생성:
 
-- Client당 5,000건을 무작위 0.2~1.0초 간격으로 보내며 이전 응답을 기다리지 않습니다.
+- Client당 5,000건을 무작위 0.2~1.0초 간격으로 생성하며, 요청 후보가 있으면 이전 응답을 기다리지 않고 보냅니다. 100석 모두 pending일 때의 예외는 위 보고서 메모를 따릅니다.
 - 미보유 시 RESERVE 60% / MULTI 40%, 보유 시 RESERVE 30% / MULTI 20% / CANCEL 50%로 시작합니다.
 - CANCEL은 응답·통지로 보유를 확인했고 pending이 아닌 좌석에서 선택합니다. 후보가 없으면 예약 요청을 보냅니다.
 - MULTI는 2~4석을 중복 없이 선택합니다.
@@ -92,7 +100,7 @@ Client 상태:
 팀장이 전달한 RESP·NOTIFY 예제로 상태 갱신을 먼저 검사하고, 지정한 로그 형식에 따라 공통 Log를 작성합니다.
 로거 사용 예제를 전원에게 공유합니다. 로그 호출 형식·파일 닫기 책임을 바꿀 필요가 있으면 팀장에게 제안합니다.
 
-완료 확인:
+검증 기준:
 
 - Client별 5,000건 송신·첫 응답 집계, NOTIFY 별도 집계.
 - 응답·통지 순서가 바뀌어도 보유 상태 유지.
@@ -112,7 +120,7 @@ Client 상태:
 좌석 기능 없는 echo로 접속·메시지 분할/병합·부분 쓰기를 먼저 검사할 수 있습니다.
 RequestQueue·Seats·ServerContext 계약에 맞춰 연결하고 원격 접속 확인을 지원합니다.
 
-완료 확인:
+검증 기준:
 
 - 서버 연결별 수신 스레드를 만들지 않고 Listener 1개로 30개 연결 처리.
 - 메시지가 나뉘거나 붙어 와도 정확하게 파싱.
@@ -295,7 +303,7 @@ Client 종료 시 최종 보유 목록과 미해결 대기 수를 각각 기록�
 
 ### 실행 환경과 제출
 
-- JDK 17 기준, Java 표준 라이브러리를 사용합니다. 현재 제공된 공통 코드만 컴파일하는 명령은 HW2 폴더에서 다음과 같습니다.
+- JDK 17 기준, Java 표준 라이브러리를 사용합니다. 공통 코드만 컴파일하는 명령은 HW2 폴더에서 다음과 같습니다.
 
 ```text
 javac --release 17 -encoding UTF-8 -d out src/cwnu/dchw2/common/Protocol.java src/cwnu/dchw2/common/Interfaces.java
@@ -341,7 +349,7 @@ ClientMain <serverHost> <port> <client당 요청 수>
 
 Monitor가 stop 후 대기를 해제하기 위한 `InterruptedException`을 해당 Monitor 스레드에서 reportFailure로 전달하면 정상 종료로 구분합니다. 예상하지 않은 Worker·Notifier·호출 스레드 interrupt는 실패입니다. 실패 시 입력을 닫고 대기자를 깨우며 등록 연결을 닫아 막힌 송신을 해제하고 실행 스레드를 join합니다. Connection.close는 송신 완료를 기다리는 방법으로 구현하면 실패 종료가 막히므로 실제 소켓을 닫아 send가 반환하도록 해야 합니다. 실패한 실행은 자동 재접속·재전송하지 않습니다.
 
-조원 클래스가 준비되면 HW2 폴더에서 전체 소스를 컴파일하고 실행합니다. 아래 명령은 연결 방법이며 실제 TCP 전체 실행은 아직 검증하지 않았습니다.
+HW2 폴더에서 전체 소스를 컴파일하고 실행하는 예시는 다음과 같습니다.
 
 ```powershell
 $sources = Get-ChildItem -LiteralPath src -Recurse -Filter '*.java' | ForEach-Object { $_.FullName }
@@ -351,29 +359,12 @@ java -cp out cwnu.dchw2.server.Server 0.0.0.0 12345 10
 
 `bindHost`·포트·요청 수는 예시 실행 인자이며 코드에 고정하지 않습니다. Server.main은 `Log(String, Path)`, `Listener(ServerContext, RequestQueue, Logger, String, int)`, `Monitor(ServerContext, RequestQueue, Seats, Logger)`를 기존 규약 그대로 찾습니다. 구성 초기화 실패와 Logger.close 실패도 종료 코드 1로 처리합니다.
 
-## 실제 구현·검증 결과와 한계
-
-Windows의 JDK 21.0.6에서 `javac --release 17 -encoding UTF-8 -Xlint:all` 컴파일 경고·오류 0건, 핵심 독립 검증 22개와 별도 JVM 진입점 검증 8개가 통과했습니다. 이는 팀장 핵심 구현과 대역 연결 결과이며 원격 정식 부하의 실측 결과가 아닙니다. 검증 소스와 임시 대역은 로컬 `Sol Session/verification`에 보관하고 GitHub에는 팀장 소스 5개·Interfaces.java의 import 정리·이 README의 변경만 반영합니다.
-
-| 구분 | 실제 확인 범위 | 결과 |
-| --- | --- | --- |
-| 팀장 실제 구현 | EMPTY·예약·본인 재예약·중복 대기·비소유자 취소·잘못된 입력 | 공통 판정표 일치 |
-| 팀장 실제 구현 | 같은 좌석 Client 30명 동시 예약, 이어서 전체 FIFO 인계·해제 | SUCCESS 1·WAITLISTED 29, 배정 30·해제 30·남은 owner 0·이중예약 0 |
-| 팀장 실제 구현 | [5,3] 대 [3,5] 동시 MULTI 200회 | 회당 SUCCESS 1·FAIL 1, Lock 순서 3,5·원 요청 순서 유지·교착에 의한 중단 없음 |
-| 팀장 실제 구현 | 부분 점유된 [5,3,8] MULTI·4석 성공 | 실패 시 빈 좌석과 기존 owner 불변·대기 등록 없음, 성공 시 4석 배정 |
-| 팀장 실제 구현 | Queue 1024개 FIFO, 포화 producer·빈 consumer 10개·close·interrupt | CV 대기와 해제, 잔여 drain, 추가 put 거부, 최대 길이 유지 |
-| 팀장 실제 구현 | 좌석별 tryLock snapshot·잘못된 MULTI의 Lock 전 거절 | 읽지 못한 좌석은 -1/false, 잘못된 입력은 점유 Lock을 기다리지 않음 |
-| 팀장 실제 구현 + 연결/Logger 대역 | Worker send·로그 시점, NOTIFY 선도착, Notifier finish 후 통지 20개 | 좌석 Lock 해제 후 I/O, 원 대기 requestId 유지, 첫 응답과 통지 별도 집계 |
-| Server + Client/연결/Listener/Monitor/Logger 대역 | Client 30명×2건, 마지막 CANCEL의 통지·마지막 Worker 로그를 latch로 지연 | Worker 정확히 10개, 응답 60·통지 1, 모두 완료·join 후 각 Client에 마지막 BYE, 최종 검사 시 Worker 종료 확인 |
-| 위 정상 대역 실행 | 서버 수지와 대역 보유 목록 대조 | 배정 30−해제 1=보유 29, WAITLISTED 1=통지 1+미해결 0, owner 일치 |
-| 실패 주입 대역 실행 | RESP·NOTIFY·요청/INIT 로그 실패, Listener 조기 반환, 예상 밖 interrupt, 막힌 send | 실패 반환·대기 해제·등록 연결/로그 닫기·스레드 종료, BYE로 성공 표시하지 않음 |
-| 별도 JVM + 조원 클래스명 대역 | main 연결, 인자 오류·합계 overflow·클래스 누락·Monitor 초기화/Logger.close 실패 | 정상 종료 코드 0, 실패 종료 코드 1, 초기화 실패 시 Logger 정리 |
-| 미검증 | 실제 TCP·NIO 부분 쓰기·실제 Client 상태/로그·Monitor 5초 감시·원격 30×5000 실행·JDK 17 런타임/Linux 실행 | 조원 코드 통합과 실제 실행 환경에서 확인 필요 |
+## 계측과 결과 해석 기준
 
 실제 처리 경로에서 이미 owner가 있는 좌석에 대한 재배정 시도를 검사하고 배정·해제·대기 등록을 집계합니다. MULTI는 입력을 검사한 뒤 오름차순으로 Lock을 획득하고 역순 finally 해제를 수행합니다. CANCEL 인계는 같은 좌석 Lock 안에서 해제 1·배정 1로 계산합니다. tryLock의 최초 실패만 경합 1회로 세며 snapshot 읽기 실패는 Worker 경합에 더하지 않습니다.
 
-Result.detail에는 좌석별 sequence·owner 전후·대기 인원 전후를 담고 MULTI는 `clientId:requestId` transaction과 Lock 순서를 함께 담습니다. Worker는 Lock 밖에서 이를 기록합니다. 독립 검증은 로그 출력 순서에 기대지 않고 sequence로 전이를 재생하여 계측·최종 owner와 대조했습니다. 실행 중 snapshot과 여러 통계 카운트는 서로 다른 시점의 값일 수 있으며 원자적 전체 스냅샷으로 주장하지 않습니다.
+Result.detail에는 좌석별 sequence·owner 전후·대기 인원 전후를 담고 MULTI는 `clientId:requestId` transaction과 Lock 순서를 함께 담습니다. Worker는 Lock 밖에서 이를 기록합니다. 검증에서는 로그 출력 순서에 기대지 않고 sequence로 전이를 재생하여 계측·최종 owner와 대조합니다. 실행 중 snapshot과 여러 통계 카운트는 서로 다른 시점의 값일 수 있으며 원자적 전체 스냅샷으로 주장하지 않습니다.
 
 서버 종료 로그는 내부 수지를 `serverBalance=PASS/FAIL`, 실제 Client 대조를 `clientCrossCheck=UNVERIFIED`로 따로 표시합니다. NOTIFY 성공 송신 수는 실제 Client 수신 수와 같은 검증이 아닙니다. 실제 Client 30명의 종료 목록·통지 수신 로그 대조 전에는 과제 전체의 최종 정합성 PASS를 선언하지 않습니다. Logger.close 실패는 이미 적힌 종료 로그와 별도로 stderr 및 실패 반환/종료 코드에 남습니다.
 
-진입점 reflection은 조원 클래스가 없는 상태에서 독립 컴파일을 가능하게 하려는 선택입니다. 클래스명·생성자 오류가 실행 시 드러나는 한계가 있어 별도 JVM 대역으로 연결·실패 경로를 확인했습니다. 자동 복구나 정교한 교착 탐지 실험은 수행하지 않았습니다.
+진입점 reflection은 조원 클래스가 없는 상태에서 독립 컴파일을 가능하게 하려는 선택입니다. 클래스명·생성자 오류가 실행 시 드러나는 한계가 있으므로 연결·실패 경로를 검증해야 합니다.
