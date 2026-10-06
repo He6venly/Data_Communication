@@ -399,7 +399,6 @@ public final class Client implements Runnable {
                         + " multiRequests=" + state.multiRequests + " cancelRequests=" + state.cancelRequests
                         + " selectedSeats=" + state.selectedSeats + " popularSeats=" + state.popularSeats
                         + " popularSeatRatio=" + state.popularSeatRatio
-                        + " popularCondition=" + (state.popularSeatRatio >= 0.5 ? "PASS" : "BELOW_HALF")
                         + (failure == null ? "" : " cause=" + failure));
     }
 
