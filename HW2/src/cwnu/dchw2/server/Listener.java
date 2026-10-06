@@ -19,7 +19,6 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
-import java.util.StringJoiner;
 
 /** 하나의 Selector에서 접속 수락과 모든 Client 수신을 처리한다. */
 public final class Listener implements Stoppable {
@@ -31,6 +30,7 @@ public final class Listener implements Stoppable {
     private final Set<ClientConnection> connections = new HashSet<>();
     private volatile boolean stopRequested;
     private boolean started;
+    private boolean resourcesClosed;
 
     public Listener(ServerContext server, RequestQueue queue,
             Logger log, String bindHost, int port) throws IOException {
@@ -77,6 +77,9 @@ public final class Listener implements Stoppable {
                 throw new IllegalStateException("Listener는 한 번만 실행할 수 있습니다.");
             }
             started = true;
+            if (stopRequested) {
+                return;
+            }
         }
         try {
             while (!stopRequested) {
@@ -162,7 +165,7 @@ public final class Listener implements Stoppable {
     }
 
     private void handleLine(ClientConnection connection, String line)
-            throws IOException, InterruptedException {
+            throws InterruptedException {
         if (connection.clientId() == 0) {
             int clientId = Protocol.parseHello(line);
             server.registerClient(clientId, connection);
@@ -171,23 +174,12 @@ public final class Listener implements Stoppable {
         Request request = Protocol.decodeRequest(line, connection.clientId());
         connection.acceptRequestId(request.requestId);
         queue.put(new Task(request, connection));
-        log.write(Protocol.commandName(request.command), "INFO",
-                requestFields(request) + " result=REQUEST");
     }
 
     private void logProtocolFailure(ClientConnection connection, RuntimeException cause)
             throws IOException {
         log.write("PROTOCOL", "FAIL", "clientId=" + connection.clientId()
                 + " reason=" + cause.getMessage());
-    }
-
-    private static String requestFields(Request request) {
-        StringJoiner seats = new StringJoiner(",");
-        for (int seat : request.seats) {
-            seats.add(Integer.toString(seat));
-        }
-        return "clientId=" + request.clientId + " requestId=" + request.requestId
-                + " seats=" + (request.seats.isEmpty() ? "-" : seats.toString());
     }
 
     private void fail(Throwable cause, ClientConnection connection) {
@@ -203,18 +195,37 @@ public final class Listener implements Stoppable {
 
     @Override
     public void stop() {
-        stopRequested = true;
-        selector.wakeup();
+        boolean closeBeforeRun;
+        synchronized (this) {
+            stopRequested = true;
+            if (resourcesClosed) {
+                return;
+            }
+            closeBeforeRun = !started;
+            selector.wakeup();
+        }
+        if (closeBeforeRun) {
+            closeListenerResources();
+        }
     }
 
     private void closeListenerResources() {
+        List<ClientConnection> connectionSnapshot;
+        synchronized (this) {
+            if (resourcesClosed) {
+                return;
+            }
+            resourcesClosed = true;
+            connectionSnapshot = new ArrayList<>(connections);
+        }
+
         IOException problem = null;
         try {
             serverChannel.close();
         } catch (IOException e) {
             problem = e;
         }
-        for (ClientConnection connection : new ArrayList<>(connections)) {
+        for (ClientConnection connection : connectionSnapshot) {
             if (connection.clientId() == 0) {
                 try {
                     connection.close();
