@@ -63,6 +63,7 @@ public final class Monitor implements Stoppable {
                         + " queueCurrent=" + queueView.currentSize
                         + " queueMax=" + queueView.maxSize
                         + " completed=" + completed);
+                printSummary(seatViews, queueView, completed);
 
                 long stalledNanos = progress == 0 ? 0 : now - progress;
                 if (queueView.currentSize > 0 && progress != 0
@@ -99,6 +100,33 @@ public final class Monitor implements Stoppable {
             }
         }
         return text.toString();
+    }
+
+    private static void printSummary(List<SeatView> seatViews,
+            QueueView queueView, int completed) {
+        int reserved = 0;
+        int waiting = 0;
+        int unreadable = 0;
+        for (SeatView seat : seatViews) {
+            if (!seat.readable) {
+                unreadable++;
+            } else {
+                reserved += seat.ownerId > 0 ? 1 : 0;
+                waiting += seat.waitingCount;
+            }
+        }
+
+        System.out.println("처리 요청: " + completed + "건");
+        if (unreadable == 0) {
+            System.out.println("예약 좌석: " + reserved + " / " + Protocol.SEAT_COUNT);
+            System.out.println("대기 등록: " + waiting + "건");
+        } else {
+            System.out.println("예약 좌석: 확인된 " + reserved + " / " + Protocol.SEAT_COUNT
+                    + " (일부 집계, 미조회 " + unreadable + "석)");
+            System.out.println("대기 등록: 확인된 " + waiting + "건 (일부 집계)");
+        }
+        System.out.println("요청 Queue: 현재 " + queueView.currentSize
+                + " / 최대 " + queueView.maxSize);
     }
 
     @Override
