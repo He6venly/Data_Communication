@@ -400,6 +400,8 @@ java -cp out cwnu.dchw2.server.Server 0.0.0.0 4575 5000
 
 ## 로컬 제출 준비 폴더
 
+아래 폴더는 GitHub의 HW2 안이 아니라 로컬 G2HW2 루트에 둔다. GitHub에는 코드와 README만 관리한다.
+
 - `제출물/`: 제출용 Readme.txt 등 최종 문서를 배치한다. 새 실행의 검증이 끝나면 소스와 로그, 영상 링크를 모아 ZIP을 만든다.
 - `제출용코드복사본/src/`: 서버·Client에 동일하게 사용할 전체 Java 소스 13개. 컴파일 결과는 복사본의 out에 생성한다.
 - `로그전용폴더/server/logs/`: 새 원격 실행의 Server.txt를 수집한다.
