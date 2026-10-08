@@ -82,7 +82,7 @@ Request·Response는 Protocol의 중첩 일반 클래스, 공유 데이터는 In
 | 로컬 Client | Windows PC 1대에서 ClientMain으로 Client 30개 실행 |
 | Java | 양쪽 Temurin JDK 17.0.20.1+1, Java 표준 라이브러리만 사용 |
 | 연결 | 로컬 PC에서 AWS 공인 주소로 직접 TCP 접속. SSH 터널이나 임시 대역을 사용하지 않음 |
-| 주소 및 포트 | Server와 ClientMain의 실행 인자로 지정. 아래 명령의 5000은 포트 예시이며 변경 가능 |
+| 주소 및 포트 | Server와 ClientMain의 실행 인자로 지정. 사용 포트는 4575이며 실행 인자로 전달 |
 | 시간대 | UTC |
 
 JDK의 `bin`이 현재 터미널의 PATH에 있어야 한다. 격리 JDK를 사용할 경우 `java`와 `javac`를 해당 JDK의 실행 파일 경로로 호출해도 된다. `java -version`과 `javac -version`으로 양쪽 버전을 확인한다.
@@ -103,10 +103,10 @@ javac -version
 mapfile -t sources < <(find src -type f -name '*.java' | sort)
 mkdir -p out
 javac --release 17 -encoding UTF-8 -Xlint:all -d out "${sources[@]}"
-java -cp out cwnu.dchw2.server.Server 0.0.0.0 5000 5000
+java -cp out cwnu.dchw2.server.Server 0.0.0.0 4575 5000
 ```
 
-마지막 명령의 첫 `5000`은 포트, 두 번째 `5000`은 Client당 요청 수다. 프로그램이 정상 종료할 때까지 Server 터미널과 원격 연결을 유지한다.
+마지막 명령의 `4575`는 포트, 마지막 `5000`은 Client당 요청 수다. 프로그램이 정상 종료할 때까지 Server 터미널과 원격 연결을 유지한다.
 
 ### 5.2 로컬 Windows Client
 
@@ -117,7 +117,7 @@ $sources = @(Get-ChildItem -LiteralPath src -Recurse -Filter '*.java' |
     ForEach-Object { $_.FullName })
 javac --release 17 -encoding UTF-8 -Xlint:all -d out $sources
 $serverHost = 'AWS_PUBLIC_IP' # 실제 AWS 공인 IP 또는 DNS로 교체
-java -cp out cwnu.dchw2.client.ClientMain $serverHost 5000 5000
+java -cp out cwnu.dchw2.client.ClientMain $serverHost 4575 5000
 ```
 
 `AWS_PUBLIC_IP`는 설명용 자리표시자이며, 실행 전에 `$serverHost`에 실제 주소를 지정한다. ClientMain은 별도 창 30개가 아니라 한 JVM 안에서 Client 30개를 실행한다. 각 Client에는 송신 스레드와 수신 스레드가 있으며 Client별 Socket은 1개다.
@@ -393,7 +393,18 @@ Monitor는 5초마다 좌석·Queue·누적 처리 수를 조회한다. Queue가
 서버는 INIT·CONNECT·MULTI의 LOCK 결과·최종 검사·종료 통계를 콘솔에도 표시합니다. Worker 이름, 요청 좌석, 결과와 실제 Lock 순서를 보여주며 긴 좌석 전이 상세는 파일에만 유지합니다. 기존 Monitor 요약도 그대로 출력됩니다. 별도 옵션은 필요 없습니다.
 
 ```text
-java -cp out cwnu.dchw2.server.Server 0.0.0.0 5000 5000
+java -cp out cwnu.dchw2.server.Server 0.0.0.0 4575 5000
 ```
 
 `serverBalance=PASS`는 서버 내부 검사이며 Client 최종 목록 대조 결과와 구분합니다. 기존 정식 실행 로그를 보존하기 위해 새 실행은 별도 폴더에서 수행합니다.
+
+## 로컬 제출 준비 폴더
+
+아래 폴더는 GitHub의 HW2 안이 아니라 로컬 G2HW2 루트에 둔다. GitHub에는 코드와 README만 관리한다.
+
+- `제출물/`: 제출용 Readme.txt 등 최종 문서를 배치한다. 새 실행의 검증이 끝나면 소스와 로그, 영상 링크를 모아 ZIP을 만든다.
+- `제출용코드복사본/src/`: 서버·Client에 동일하게 사용할 전체 Java 소스 13개. 컴파일 결과는 복사본의 out에 생성한다.
+- `로그전용폴더/server/logs/`: 새 원격 실행의 Server.txt를 수집한다.
+- `로그전용폴더/client/logs/`: 새 로컬 실행의 Client1.txt~Client30.txt를 저장한다. Client는 로그전용폴더/client를 작업 폴더로 실행하고 classpath는 코드복사본의 out 절대 경로로 지정한다.
+
+기존 실행 결과는 새 제출 구성에 포함하지 않는다. 새 실행의 최종 판정과 실측표는 실행·로그 대조 후 작성한다. AWS에는 TCP 4575 수신이 허용되어야 하며 SSH 접속 포트 22는 변경하지 않는다. 개인 키·로그·제출 준비 폴더는 GitHub에 올리지 않는다.
