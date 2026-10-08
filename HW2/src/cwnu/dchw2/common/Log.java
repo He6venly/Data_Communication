@@ -19,7 +19,6 @@ public final class Log implements Logger {
     private final String node;
     private final BufferedWriter writer;
     private boolean closed;
-    private final boolean console = Boolean.getBoolean("dchw2.console");
 
     public Log(String node, Path file) throws IOException {
         this.node = field(node, "node");
@@ -45,8 +44,8 @@ public final class Log implements Logger {
         writer.write("[" + CLOCK.format(Instant.now()) + "] " + node + " | "
                 + eventField + " | " + status + " | " + singleLine + "\n");
         writer.flush();
-        // 촬영 시 서버의 접속·다중 예약·종료만 표시한다. 파일 로그는 그대로 유지한다.
-        if (console && node.equals("SERVER")
+        // 서버의 접속·다중 예약·종료만 표시한다. 파일 로그는 그대로 유지한다.
+        if (node.equals("SERVER")
                 && (eventField.equals("INIT") || eventField.equals("CONNECT")
                 || eventField.equals("LOCK") || eventField.equals("DOUBLE_BOOKING_CHECK")
                 || eventField.equals("TERMINATE"))) {

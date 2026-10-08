@@ -388,12 +388,12 @@ Monitor는 5초마다 좌석·Queue·누적 처리 수를 조회한다. Queue가
 
 영상 링크의 다운로드·공유 권한·재생과 ZIP의 압축 해제를 확인한다. 검증용 증빙 ZIP은 최종 제출 ZIP과 다르다. PEM, JDK 바이너리, out의 class, 개발용 대역과 개인 세션은 제출물에서 제외한다. GitHub에는 코드와 README만 작업 브랜치·한글 PR로 반영하며 결과 자료·영상은 제출물로 별도 관리한다. 기본 브랜치 직접 반영과 자동 병합은 하지 않는다.
 
-### 촬영용 콘솔 출력
+### 서버 콘솔 출력
 
-서버 실행 시 `-Ddchw2.console=true`를 추가하면 INIT·CONNECT·MULTI의 LOCK 결과·최종 검사·종료 통계만 콘솔에도 표시합니다. Worker 이름, 요청 좌석, 결과와 실제 Lock 순서를 보여주며 긴 좌석 전이 상세는 파일에만 유지합니다. 기존 Monitor 요약은 그대로 출력됩니다. 옵션을 생략하면 추가 출력은 없습니다.
+서버는 INIT·CONNECT·MULTI의 LOCK 결과·최종 검사·종료 통계를 콘솔에도 표시합니다. Worker 이름, 요청 좌석, 결과와 실제 Lock 순서를 보여주며 긴 좌석 전이 상세는 파일에만 유지합니다. 기존 Monitor 요약도 그대로 출력됩니다. 별도 옵션은 필요 없습니다.
 
 ```text
-java -Ddchw2.console=true -cp out cwnu.dchw2.server.Server 0.0.0.0 5000 20
+java -cp out cwnu.dchw2.server.Server 0.0.0.0 5000 5000
 ```
 
-위 명령은 촬영용 축소 실행입니다. `serverBalance=PASS`는 서버 내부 검사이며 Client 최종 목록 대조 결과와 구분합니다. 기존 정식 실행 로그를 보존하기 위해 별도 실행 폴더를 사용합니다.
+`serverBalance=PASS`는 서버 내부 검사이며 Client 최종 목록 대조 결과와 구분합니다. 기존 정식 실행 로그를 보존하기 위해 새 실행은 별도 폴더에서 수행합니다.
