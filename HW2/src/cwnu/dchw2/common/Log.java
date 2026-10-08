@@ -44,6 +44,17 @@ public final class Log implements Logger {
         writer.write("[" + CLOCK.format(Instant.now()) + "] " + node + " | "
                 + eventField + " | " + status + " | " + singleLine + "\n");
         writer.flush();
+        // 서버의 접속·다중 예약·종료만 표시한다. 파일 로그는 그대로 유지한다.
+        if (node.equals("SERVER")
+                && (eventField.equals("INIT") || eventField.equals("CONNECT")
+                || eventField.equals("LOCK") || eventField.equals("DOUBLE_BOOKING_CHECK")
+                || eventField.equals("TERMINATE"))) {
+            int transitions = singleLine.indexOf(" transitions=");
+            String summary = transitions < 0 ? singleLine : singleLine.substring(0, transitions);
+            System.out.println("[" + CLOCK.format(Instant.now()) + "] "
+                    + Thread.currentThread().getName() + " | " + eventField
+                    + " | " + status + " | " + summary);
+        }
     }
 
     @Override
