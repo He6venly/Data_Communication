@@ -3,13 +3,17 @@
 2026학년도 2학기 데이터통신 2조. **Python으로 확정**, HW2 코드는 재사용하지 않고 새로 구현한다.
 현재 상태: 설계 완료, 프로그램 구현 전. 제출 기한: **2026-10-26(월) 23:59**.
 
+사용자 확정: **안선효 : 황대겸 : 황왕석 = 4 : 3 : 3**을 목표로 배분하며 AWS Coordinator TCP 포트는 **4575**다. 공통 규약 4항목은 2026-10-14 안선효가 기존 안 유지로 확정했으며 황왕석이 구현한다.
+
+이 README에 구현 계획·역할 분담·확정된 공통 규약을 정리한다.
+
 ## 1. 설계 방향
 
 **프로세스별로 담당을 나누고, 담당 간 연결은 TCP 메시지로 제한한다.** Coordinator·Worker·Launcher는 서로의 Python 모듈을 import하지 않는다. 내부 상태·Lock·Queue도 각자 관리한다.
 
-공통 패키지는 설정값·메시지·줄 단위 송수신·로그만 제공한다. Task 소유권·Worker 생사·crash 스케줄 같은 업무 상태는 공통으로 옮기지 않는다. 공통 규약을 먼저 고정하고, 상대 프로그램은 담당별 TCP 대역으로 대체해 독립 개발한다.
+공통 패키지는 설정값·메시지·줄 단위 송수신·로그만 제공한다. Task 소유권·Worker 생사·crash 스케줄 같은 업무 상태는 공통으로 옮기지 않는다. 확정된 공통 규약 4항목을 사용하고, 필요하면 상대 프로그램을 TCP 대역으로 대체해 독립 개발한다.
 
-실행 기준은 **Python 3.12 이상, 표준 라이브러리만 사용**하는 설계안이다. Coordinator의 Dispatcher는 `threading.Thread` 6개를 직접 생성한다. 기본 Thread Pool 크기나 요청별 스레드 생성에 의존하지 않는다. 테스트는 `unittest`를 사용한다.
+실행 기준은 사용자 확정 규약인 **Python 3.12 이상, 표준 라이브러리만 사용**이다. Coordinator의 Dispatcher는 `threading.Thread` 6개를 직접 생성한다. 기본 Thread Pool 크기나 요청별 스레드 생성에 의존하지 않는다. 개인 테스트의 도구·방법·파일 구성은 각 담당이 자유롭게 정한다. 아래 테스트 폴더·대역은 선택 가능한 예시다.
 
 | 프로그램 | 위치 | 담당하는 원본 데이터 |
 | --- | --- | --- |
@@ -19,18 +23,19 @@
 
 ## 2. 3인 역할 배분
 
-기존 GitHub의 조원 명단을 기준으로 배분한다. HW2의 담당 범위는 이번 구현에 이어 붙이지 않는다.
+기존 담당과 구조를 유지하고 로그 분석 도구만 황왕석에서 안선효로 이동한다. 4:3:3은 복잡도·통합 책임을 고려한 목표 비중이며 실측 시간 비율은 아니다.
 
-| 담당 | 주 담당 범위 | 소유 경로 | 독립 검증 상대 |
+| 담당 | 목표 비중 | 주 담당 범위 | 소유 경로 |
 | --- | --- | --- | --- |
-| **안선효** | Coordinator 전체, 원격 배포, 최종 통합 | `hw3/coordinator/`, `tests/coordinator/` | 본인이 작성한 TCP fake Worker 10개 |
-| **황대겸** | Worker 전체, 소수 계산, CKPT·crash·재합류 | `hw3/worker/`, `tests/worker/` | 본인이 작성한 TCP fake Coordinator·Buddy·Launcher |
-| **황왕석** | 공통 규약 구현, Launcher, 로그 분석·통합 시나리오 | `hw3/common/`, `hw3/launcher/`, `hw3/tools/`, 해당 tests | 본인이 작성한 TCP fake Worker, 합성 로그 |
+| **안선효(본인)** | **4** | Coordinator, 로그 분석·지표, AWS 배포, 최종 통합·문서·제출 취합 | `hw3/coordinator/`, `hw3/tools/` |
+| **황대겸** | **3** | Worker 전체, 소수 계산, CKPT·crash·재합류 | `hw3/worker/` |
+| **황왕석** | **3** | 확정된 규약의 공통 모듈 구현, Launcher | `hw3/common/`, `hw3/launcher/` |
 
-작업량은 Coordinator의 동기화·FD, Worker의 계산·상태 경쟁, Launcher의 스케줄·공통 통신·검증 도구로 나눴다. 공통 모듈 작성은 황왕석의 첫 작은 작업으로 끝내고, 이후 Launcher와 검증을 진행한다.
+공통 규약 결정은 조원 구현 업무에서 분리한다. 황왕석이 확정된 규약의 최소 공통 모듈을 구현하고 Launcher를 진행한다. 개인 테스트의 방법·대역·파일 구성은 각자 정한다.
 
 ### 안선효: Coordinator
 
+- 아래 확정된 공통 규약 4항목을 조원에게 공지한다.
 - Listener 1개, Dispatcher 6개, Failure Detector 1개, Main으로 구성한다. POOL은 Listener에서 5초마다 기록하고 추가 Monitor는 두지 않는다.
 - HELLO·RING_OK 등록 완료를 Main의 CV로 기다려 RING·START를 전송한다. START 시각으로 lastHB를 초기화하고 FD를 시작한다.
 - Listener는 Socket별 줄 버퍼를 관리하고 HB를 직접 반영한다. 나머지 요청은 Request Queue에 넣는다.
@@ -38,6 +43,8 @@
 - Task별 Lock 안에서 RESULT의 DONE·epoch·owner 검사와 Commit을 함께 수행한다.
 - FD는 새 DEAD를 먼저 모두 표시한 뒤, 각 DEAD Worker 소유의 **모든 ASSIGNED Task**를 다음 ALIVE로 인계한다.
 - Main이 마지막 Commit 통지를 받아 VERIFY·BYE·스레드 종료·join을 수행한다.
+- 저장된 로그 12개를 읽는 `tools/verify_logs.py`를 구현해 정합성·장애 회차·복구 지표를 분석한다. 다른 프로그램의 내부 객체는 참조하지 않는다.
+- AWS Coordinator를 TCP 4575로 실행하고 전체 연결·정식 실행·문서·제출을 취합한다.
 - 담당 검증: 기동 차단, 중복 Commit·stale 결과, REQ/FD 경쟁, 동시 DEAD의 대상 선정, 재인계·종료. 대역 검증은 상태 전이와 정합성에 한정하며 최종 소수 합계는 실제 Worker와 확인한다.
 - 반환물: 담당 소스·테스트, 스레드/Lock 구조 설명, 실행 명령, 검증 결과·남은 문제, 원격 배포 정보.
 
@@ -52,15 +59,15 @@
 - 담당 검증: 소수 누적값, CKPT 재개/소실, 반복 crash, 전송 직전 crash, READY 지연, NO_TASK 이후 TAKEOVER, CRASHED 중 BYE.
 - 반환물: 담당 소스·테스트, 초기화 목록·송신 보장 설명, 재개 step 로그, 검증 결과·남은 문제.
 
-### 황왕석: 공통·Launcher·검증
+### 황왕석: 공통 모듈 구현·Launcher
 
-- 4절의 공통 API를 작은 모듈로 구현하고 분할/결합 메시지·송신 직렬화·로그 형식을 먼저 검증한다. 공통 모듈은 스레드를 생성하지 않는다.
+- 안선효가 확정한 메시지·API·CLI·로그 규약을 4절의 작은 공통 모듈로 구현한다. 공통 규약 설계·합의 업무는 맡지 않는다. 공통 모듈은 스레드를 생성하지 않는다.
 - Launcher가 `subprocess.Popen`으로 Worker 10개를 직접 실행한다. Worker 클래스를 import하거나 같은 프로세스의 스레드로 실행하지 않는다.
 - READY 10개 후 t0를 잡고 무작위 장애를 주입한다. CRASHED+REJOINING이 2개면 REJOINED까지 기다린 뒤 간격을 새로 추첨한다.
 - 제어 연결 EOF를 EXITED로 처리하고 예정 RESTART를 취소한다. 모든 Worker 종료 후 Launcher를 종료한다.
-- 로그 분석기는 프로그램 객체 대신 저장된 로그 12개를 입력받는다. 조원 소스를 호출하지 않고 합계·Commit·장애 회차·지표를 검증한다.
-- 담당 검증: 재현 가능한 난수 호출 순서, 동시 장애 상한, 80초 이후 주입 중단, EOF·종료, 불완전/불일치 로그 검출.
-- 반환물: 담당 소스·테스트, 모든 로그 명세, 검증 도구·분석 표, 검증 결과·남은 문제.
+- 확정된 로그 형식·필드를 구현하고 실제 추가 이벤트의 설명을 안선효에게 전달한다. 로그 분석 도구·지표 산출은 안선효가 담당한다.
+- 담당 검증: 공통 송수신·로그 구현, 난수 호출 순서, 동시 장애 상한, 80초 이후 주입 중단, EOF·종료.
+- 반환물: 담당 소스·테스트, 실행 방법·추가 이벤트 설명, 검증 결과·남은 문제.
 
 ## 3. 제안 패키지·파일 구성
 
@@ -77,36 +84,33 @@ HW3/
 │  │  ├─ transport.py            # LineBuffer, 송신 Lock·부분 쓰기 처리
 │  │  └─ log.py                  # 노드별 파일·공통 로그 형식
 │  ├─ coordinator/               # 안선효
-│  │  ├─ __main__.py             # CLI → app 실행
-│  │  ├─ app.py                  # 구성·기동·Ring·VERIFY·BYE·join
+│  │  ├─ __main__.py             # 실행 인자·구성·기동·Ring·VERIFY·BYE·join
 │  │  ├─ tables.py               # Task/Worker Table·PENDING·Lock·지표
 │  │  ├─ listener.py             # select 감시·직접 HB 처리·Queue 적재
 │  │  ├─ dispatcher.py           # 고정 6개, 배정·결과·재합류 처리
 │  │  └─ detector.py             # 1초 FD·다음 ALIVE·전체 소유 Task 인계
 │  ├─ worker/                    # 황대겸
-│  │  ├─ __main__.py             # CLI → app 실행
-│  │  ├─ app.py                  # 구성·스레드·READY·정상 종료
+│  │  ├─ __main__.py             # 실행 인자·구성·스레드·READY·정상 종료
 │  │  ├─ state.py                # 상태·crash_gen·Queue·Store·CV
 │  │  ├─ network.py              # Control Recv·Peer Server·송신 경계
 │  │  ├─ heartbeat.py            # RUNNING에서만 1초 HB
 │  │  ├─ compute.py              # step 계산·CKPT·RESULT·다음 REQ
 │  │  └─ primes.py               # 작은 소수·구간 체·step 범위
 │  ├─ launcher/                  # 황왕석
-│  │  ├─ __main__.py             # CLI → app 실행
-│  │  ├─ app.py                  # 제어 연결·READY/REJOINED/EOF·종료
+│  │  ├─ __main__.py             # 실행 인자·제어 연결·READY/REJOINED/EOF·종료
 │  │  ├─ processes.py            # Worker 명령 작성·Popen·핸들 관리
 │  │  └─ chaos.py                # RNG·상태 표·crash/restart 시각 결정
-│  └─ tools/                     # 황왕석
+│  └─ tools/                     # 안선효
 │     └─ verify_logs.py          # 동일 실행 로그·장애별 지표 검사
 └─ tests/
    ├─ coordinator/               # 안선효: 테스트와 자기 TCP 대역
    ├─ worker/                    # 황대겸: 테스트와 자기 TCP 대역
    ├─ common/                    # 황왕석
    ├─ launcher/                  # 황왕석: 테스트와 자기 TCP 대역
-   └─ integration/               # 황왕석 시나리오, 각 담당이 자기 오류 수정
+   └─ integration/               # 안선효 취합, 각 담당이 자기 오류 수정
 ```
 
-파일 수를 줄이려면 같은 담당의 파일만 합칠 수 있다. 예를 들어 launcher의 `processes.py`는 `app.py`에 합칠 수 있지만 Worker 상태나 Coordinator 테이블을 공통 패키지로 합치지 않는다.
+파일 수를 줄이려면 같은 담당의 파일만 합칠 수 있다. 각 실행 패키지의 `__main__.py`가 인자 처리·초기화·실행·종료를 담당한다. 필요하면 launcher의 `processes.py`도 `__main__.py`에 합칠 수 있지만 Worker 상태나 Coordinator 테이블을 공통 패키지로 합치지 않는다.
 
 ## 4. 최소 공통 계약과 의존성
 
@@ -120,7 +124,18 @@ flowchart TD
 
 Coordinator↔Worker, Worker→Buddy, Launcher↔Worker는 TCP로만 연결한다. Launcher↔Coordinator 연결은 없다. `common`은 다른 HW3 패키지를 import하지 않고 소유권·생존 상태·전역 Queue를 갖지 않는다.
 
-공통 API 이름과 동작은 아래를 먼저 고정한다. 구체적 클래스 내부는 담당자가 결정한다.
+### 사용자 확정 공통 규약: 4개
+
+아래 4항목과 이에 대응하는 API·메시지·CLI·로그 상세는 **2026-10-14 사용자 선택으로 확정**됐다. 현재 HW3 Python 소스는 없으며 `common/settings.py`, `common/protocol.py`, `common/transport.py`, `common/log.py`와 각 프로그램의 `__main__.py`에 구현할 계약이다.
+
+| 확정 항목 | 계약 |
+| --- | --- |
+| 메시지 문법 | UTF-8·LF 한 줄, PDF 예제의 메시지명·필드 순서 유지 |
+| 공통 API | 아래 settings·protocol·transport·log API 유지 |
+| 실행 환경·인자 | Python 3.12 이상·표준 라이브러리, `python -m`, 기존 인자명·ms 단위 유지. **Coordinator TCP 4575는 확정** |
+| 로그 계약 | 기존 KST·텍스트+JSON·파일명 12개·이벤트 필드·동일 run_id 유지 |
+
+PDF의 필수 동작·수치와 담당 내부의 자료구조·스레드 배치·테스트 방식은 사전 공통 결정 항목에 추가하지 않는다. 공통 API 내부 구현은 담당자가 결정한다.
 
 | 모듈 | 고정할 계약 | 경계 |
 | --- | --- | --- |
@@ -129,15 +144,31 @@ Coordinator↔Worker, Worker→Buddy, Launcher↔Worker는 TCP로만 연결한�
 | transport | `LineBuffer.feed(bytes) -> list[str]`, `send_line(socket, line, send_lock)` | feed는 미완성 줄을 보관. send_line은 LF 하나를 붙여 전체 바이트를 직렬화해 송신하며 업무 Lock을 받지 않음 |
 | log | `NodeLogger(node, path, run_id)`, `write(event, status, fields)`, `close()` | 자기 파일 하나만 관리. 다른 노드의 파일을 지우거나 통계 상태를 변경하지 않음 |
 
-공통 구현 전에도 각 담당은 같은 계약의 테스트 대역이나 TCP 스크립트로 개발한다. 공통 모듈 1차 완료 후 API를 고정하고 직접 사용하는 호출부로 교체한다. 테스트 대역은 `tests/`에만 두고 제품 실행에 연결하지 않는다.
+공통 구현 전에는 각 담당이 내부 상태·계산과 테스트 대역을 개발한다. 공통 최소 구현은 먼저 하나의 기준으로 통합하고, 세 담당이 같은 커밋에서 시작한다. 공통 파일을 각자 복사해 수정하거나 담당별로 다른 버전을 사용하지 않는다. 테스트 대역은 `tests/`에만 두고 제품 실행에 연결하지 않는다.
 
-공통 API 변경은 이유·영향 경로·수정할 호출을 PR에 기록한다. 각 담당 소유 파일은 해당 담당이 수정하고, 팀장이 공통 규약 변경과 최종 통합을 확인한다.
+공통 규약 변경이 필요하면 이유·영향 경로·수정할 호출을 보고하고 안선효가 결정한다. 각 담당 소유 파일은 해당 담당이 수정하며 안선효가 최종 통합을 확인한다.
+
+### 합칠 때의 문제와 예방 기준
+
+| 통합 문제 | 예방 기준 |
+| --- | --- |
+| encode/parse의 인자·필드 해석이 서로 다름 | 공통 모듈을 한 번 구현·검증하고 같은 기준 커밋 사용. 메시지별 정상/오류 예제를 `tests/common/`에서 관리 |
+| 각자의 fake 상대가 실제 상대와 다르게 동작 | 대역 테스트와 별도로 실제 Coordinator·Worker·Launcher를 초반부터 연결. 실제 상대와의 통과 기록이 있어야 기능 완료 |
+| ACK·ASSIGN·TAKEOVER 도착 순서를 다르게 가정 | 허용 순서를 공통 계약에 기록. ACK 뒤에만 ASSIGN이 온다고 가정하지 않으며, 계산 중 TAKEOVER·늦은 ACK·재합류 메시지 사례도 검사 |
+| CLI·경로·Python 환경이 맞지 않음 | 같은 `python -m` 진입점·인자·run_id·로그 위치 규약으로 실행. Launcher는 자기 인터프리터로 별도 Worker 프로세스를 실행 |
+| 로그는 남지만 분석기가 다른 필드를 기대함 | 이벤트별 필드명·자료형을 공통 기준으로 고정하고, 실제 프로그램의 로그 12개를 분석기에 넣어 확인 |
+| 공통 파일·README를 동시에 수정해 Git 충돌 | `common/`·루트 패키지 초기화는 황왕석, 공통 README 취합은 안선효. 각 소유 파일 변경은 담당자가 반영 |
+
+공통 규약은 `CONTRACT_VERSION=1`로 시작하고 INIT 로그의 `contract_version`에 기록한다. 메시지·함수 서명·로그 필드·실행 인자 변경은 규약 변경으로 관리한다. 변경 시 영향을 받는 호출부와 테스트를 함께 준비하고, 세 담당이 같은 버전으로 전환한다. HELLO 등 과제 메시지 형식을 임의로 늘리지 않는다.
+
+통합·실행 시나리오·로그 검사는 안선효, Worker 상태·계산은 황대겸, 공통 모듈·Launcher는 황왕석이 맡는다. 재현 명령·관련 로그·기대 동작을 남기고 소유 담당이 자기 코드에서 수정한다.
 
 ### settings의 고정 수치
 
 | 항목 | 정식 값 |
 | --- | --- |
 | Worker / Dispatcher | 10개 프로세스 / 6개 고정 스레드 |
+| AWS Coordinator TCP 포트(사용자 확정) | 4575; 실행 인자로 전달 |
 | Task / step | Task 1,000개, Task당 수 100,000개; step 10개, step당 수 10,000개 |
 | step 범위 | `lo=k*100000+(s-1)*10000+1`, `hi=lo+9999`, 양 끝 포함 |
 | Buddy / Peer 포트 | `i mod 10 + 1` / `7000+i` |
@@ -174,26 +205,26 @@ Worker의 다음 REQ는 RESULT 송신 후 진행 Task·대기 Queue가 모두 �
 
 ```bash
 # 원격 호스트
-python -m hw3.coordinator --host 0.0.0.0 --port 9000 --run-id hw3-run01 --log-dir logs/hw3-run01
+python -m hw3.coordinator --host 0.0.0.0 --port 4575 --run-id hw3-run01 --log-dir logs/hw3-run01
 
 # 로컬 PC: Launcher가 Worker 10개를 실행
-python -m hw3.launcher --coord <REMOTE_IP>:9000 --workers 10 --peer-ip 127.0.0.1 --peer-base 7000 --step-delay 100 --seed 42 --run-id hw3-run01 --log-dir logs/hw3-run01
+python -m hw3.launcher --coord <REMOTE_IP>:4575 --workers 10 --peer-ip 127.0.0.1 --peer-base 7000 --step-delay 100 --seed 42 --run-id hw3-run01 --log-dir logs/hw3-run01
 
 # Launcher가 내부적으로 실행하는 Worker 명령 예
-python -m hw3.worker --id 1 --coord <REMOTE_IP>:9000 --peer-ip 127.0.0.1 --peer-port 7001 --step-delay 100 --run-id hw3-run01 --log-dir logs/hw3-run01
+python -m hw3.worker --id 1 --coord <REMOTE_IP>:4575 --peer-ip 127.0.0.1 --peer-port 7001 --step-delay 100 --run-id hw3-run01 --log-dir logs/hw3-run01
 ```
 
 Launcher는 자신의 `sys.executable`을 사용하고 명령 인자를 리스트로 전달한다. Worker 경로·클래스를 import하지 않으므로 테스트에서는 자기 fake Worker 명령으로 교체해 독립 검증할 수 있다.
 
 ## 6. 로그 계약과 검증 담당의 독립성
 
-형식은 `[HH:MM:SS.mmm] NODE | EVENT | STATUS | message`, 시간대는 KST로 통일하는 설계안이다. 타임아웃·지연 계산에는 각 프로그램의 단조 시계를 사용하고, 로그 간 대조에는 동기화한 실제 시각을 사용한다.
+형식은 `[HH:MM:SS.mmm] NODE | EVENT | STATUS | message`, 시간대는 사용자 확정 규약에 따라 KST로 통일한다. 타임아웃·지연 계산에는 각 프로그램의 단조 시계를 사용하고, 로그 간 대조에는 동기화한 실제 시각을 사용한다.
 
 `message`는 JSON 객체로 기록한다. 모든 행에 `run_id`와 `ts_unix_ms`를 넣고 이벤트별 필드를 추가한다. 이 방식으로 검증 도구가 문장이나 필드 순서에 의존하지 않도록 한다. 파일은 `Coordinator.txt`, `Worker1.txt`~`Worker10.txt`, `Launcher.txt`다.
 
 | EVENT | 최소 필드 |
 | --- | --- |
-| INIT / START | node·설정값 / 시작 시각·ring_ready |
+| INIT / START | node·설정값·contract_version / 시작 시각·ring_ready |
 | ASSIGN | task, epoch, worker |
 | CRASH / RESTART | worker, 해당 Worker의 장애 회차, down 목록 / worker |
 | SUSPECT / DEAD | worker, last_hb_elapsed_ms, elapsed_ms; DEAD는 owned_tasks, to_worker, dead_now |
@@ -209,6 +240,28 @@ RING·CONNECT·CKPT·HB·TERMINATE와 추가 이벤트도 `AllDefinedLogs.txt`�
 Coordinator의 elapsed_ms와 last_hb_elapsed_ms는 START 시각을 0으로 한 같은 단조 시계 기준이다. 감지 지연은 두 값의 차이로 계산한다. Worker의 재개 로그가 없는 TAKEOVER는 CKPT 절약률 분자에 0을 더하고 인계 Task 수에는 포함한다.
 
 검증 도구는 1,000 DONE·각 commit_count=1·합계 5,761,455·COMMIT 1,000개·CRASH/DEAD/승인 REJOIN 수 일치·동시 장애 최대 2개·재합류 후 새 Task를 검사한다. 복구 시간은 재인계까지 추적한 최종 Commit을 기준으로 하고, CKPT 절약률은 Worker의 resume_step에서 계산한다.
+
+### 구현 시 안내: 영상에서 요구 동작을 확인하기 쉬운 로그
+
+**구현 단계부터 영상 시연의 가독성을 고려해 로그를 설계한다.** 교수자가 화면에서 필수 기능과 상태 전이를 쉽게 찾고, 같은 Task의 장애·인계·재개·완료를 따라갈 수 있어야 한다. 기존 KST·텍스트+JSON 형식, 이벤트명·필드·파일명 12개는 유지한다.
+
+| 확인할 동작 | 화면에서 찾기 쉬워야 할 정보 |
+| --- | --- |
+| 실행 구성·시작 | 원격 Coordinator 주소·TCP 4575, 로컬 Worker별 id·PID·Peer 포트, 실제 Dispatcher 수·Task별 Lock 수. HELLO 10개 → RING → RING_OK 10개 → START, READY 10개 |
+| 정상 계산·진행 | ASSIGN의 Task·epoch·Worker, CKPT의 step·partial, RESULT·COMMIT. POOL은 pending·assigned·done을 동일한 순서로 표시 |
+| 가상 crash·장애 감지 | Launcher의 victim·장애 회차·down 목록과 CRASHED+REJOINING 수, Worker의 CRASH 전환·기억 초기화. Coordinator의 SUSPECT → DEAD와 마지막 HB 기준 경과시간 |
+| 인계·CKPT 재개 | 동일 Task의 from/to Worker·old/new epoch, Worker의 ckpt_epoch·resume_step·초기 partial. CKPT가 없으면 step 1·partial 0임을 명시 |
+| 반복·연속 Buddy 장애 | 재인계된 Task도 Task 번호로 이어서 추적. 죽은 Worker의 원래 Task와 인계받은 Task가 모두 이동했는지 확인 가능하게 기록 |
+| 재합류·종료 | RESTART → REJOIN → WELCOME → REJOINED와 새 ASSIGN. PENDING이 없으면 NO_TASK로 표시. 최종 VERIFY의 done=1000·commit_count 검증·double_commit=0·sum=5761455·PASS/FAIL, BYE·종료 |
+
+- Task·epoch·Worker·step 등 식별 필드는 눈에 잘 들어오는 일정한 순서로 기록한다. 이벤트 한 건을 줄 단위로 완성해 출력하며 스레드 출력이 한 줄 안에서 섞이지 않게 한다.
+- 시연 화면에는 기동·장애·인계·재합류·POOL·VERIFY를 중심으로 표시하고, 반복되는 HB·CKPT 상세는 원본 로그 파일에 보존한다. 표시 필터는 파일 내용을 바꾸지 않는다. 색상은 선택 사항이며 색상 없이도 의미를 읽을 수 있어야 한다.
+- 여러 노드의 로그를 보여 줄 때 NODE·실제 시각·run_id·Task·epoch로 연결한다. 전역 메시지 순서를 임의로 맞추지 않으며 Launcher CRASH와 Coordinator DEAD의 시차도 그대로 보여 준다.
+- 로그는 실제 상태 전이·계산·수신·송신 결과를 기록한다. send 성공만으로 상대 처리 완료를 표시하지 않는다. 가상 crash의 TCP 유지·송신 중단과 스레드/Lock 준수는 실제 동작 확인을 함께 남긴다.
+- 시연용 출력 때문에 업무 Lock 안에서 I/O하거나 Coordinator에 허용되지 않은 로그 스레드를 추가하지 않는다. 필수 기록은 없애지 않고, 출력이 HB·FD·복구를 방해하지 않도록 구현한다.
+- 정식 영상과 제출 로그는 동일 원격 실행에서 얻는다. 개발용 수동 이웃 장애 실행은 별도로 구분하고 정식 무작위 장애 실행의 증거로 섞지 않는다. REJECT_STALE 등 실제 발생한 추가 경로만 설명한다.
+
+각 담당은 자기 이벤트의 가독성을 구현하면서 확인하고, 안선효는 실제 실행 로그로 위 동작을 찾아볼 수 있는지 최종 취합한다. 이 안내는 구현 기준이며 이번 문서 변경에서 시연·실행을 검증한 결과는 아니다.
 
 ## 7. 핵심 동기화·장애 경계
 
@@ -226,19 +279,24 @@ Coordinator의 elapsed_ms와 last_hb_elapsed_ms는 START 시각을 0으로 한 �
 
 ## 8. 개발 순서와 완료 기준
 
-| 단계 | 세 사람이 독립적으로 할 작업 | 완료 기준 |
+| 단계 | 각자 구현하면서 함께 연결할 범위 | 통합 통과 기준 |
 | --- | --- | --- |
-| 0. 공통 규약 고정 | 팀장 규약 확인, 황왕석 공통 최소 구현; 나머지는 상태·계산·TCP 대역 개발 | 메시지·공통 API·CLI·로그 필드 동일, 공통 모듈에 업무 상태/추가 스레드 없음 |
-| 1. 기본 구현 | Coordinator 배정/Commit, Worker 계산/CKPT, Launcher 프로세스/제어 | 각 담당의 독립 테스트 통과, 기동/정상 계산/종료 경로 구현 |
-| 2. 장애 구현 | FD·전체 소유 Task 인계 / crash·재합류 / RNG·동시 상한 | 단일·반복·이웃 장애의 독립 테스트 통과 |
-| 3. 통합 | 실제 프로그램 3종 연결, 담당별 자기 오류 수정 | 로컬 1,000 Task와 경계 경쟁 검사 통과, 누락·이중 Commit 없음 |
-| 4. 제출 실행 | 안선효 원격 배포, 황대겸 재개 로그 확인, 황왕석 지표 분석 | 원격 + delay 100에서 동일 실행 로그 12개, 정합성 PASS, 문서·영상·ZIP 검증 |
+| 0. 공통 구현 | 황왕석은 확정된 4항목의 최소 구현. 안선효·황대겸은 내부 로직 개발 | 확정 규약 공지, 세 담당의 공통 구현·버전 동일 |
+| 1. 실제 기동 연결 | 실제 Launcher가 실제 Worker 10개 실행, 실제 Coordinator에 등록·Ring 연결 | HELLO 10개→RING→RING_OK 10개→START, READY 10개, HB 수신. 계산 기능 완성까지 이 확인을 미루지 않음 |
+| 2. 정상 흐름 연결 | 실제 REQ→ASSIGN→계산→CKPT→RESULT→ACK, 정상 종료 | 첫 Task의 왕복을 먼저 확인하고 장애 없는 1,000 DONE·합계·종료를 검증 |
+| 3. 단일 장애 연결 | 개발용 수동 CRASH→FD→TAKEOVER→RESTART→REJOIN | 실제 CKPT 다음 step 재개, 새 epoch로 한 번 Commit, 재합류 후 새 Task |
+| 4. 반복·이웃 장애 연결 | 실제 프로그램으로 재인계·메시지 경쟁, 이후 무작위 Launcher | 기존 인계 Task 누락 없음, 동시 장애 ≤2, stale 결과 거부, W10·W1 경계도 통과 |
+| 5. 제출 실행 | 안선효 AWS 배포·로그 분석·취합, 황대겸 Worker 확인, 황왕석 Launcher 확인 | AWS TCP 4575 + delay 100에서 동일 실행 로그 12개, 정합성 PASS, 문서·영상·ZIP 검증 |
 
-독립 완료 후 통합할 때까지 대기하지 않는다. Coordinator는 다른 구현 없이 메시지를 주입해 epoch·owner 경합을 확인하고, Worker는 가짜 제어 서버로 계산·초기화를 확인하며, Launcher는 가짜 Worker로 장애 상한·종료를 확인한다. 정식 PASS는 실제 세 프로그램으로 얻는다.
+**통합은 모든 담당의 구현이 끝난 뒤 한 번 하는 작업이 아니다.** 기능을 추가할 때마다 직전까지 통과한 실제 연결 검사를 다시 확인한다. 독립 테스트는 담당 내부 로직 확인에 사용하고, 상대 프로그램과 연결되는 기능은 실제 상대와의 검사까지 통과해야 완료로 처리한다.
+
+PR에는 독립 테스트 결과와 실제 연결 결과를 구분해 기록한다. 현재 단계의 실제 연결이 깨졌다면 해당 기능은 통합 미완료로 표시한다. 다음 단계로 넘어가기 전에 재현 로그로 원인을 좁히고 소유 담당이 수정한다. 여러 스레드·TCP 연결의 전역 메시지 순서를 하나로 고정하지 않고, Task별 owner·epoch·Commit 조건과 필요한 선후 관계를 검사한다.
+
+기능 PR을 통합할 때는 최신 기준 브랜치에 맞춘 뒤 단계별 연결 결과를 확인한다. 공통 변경으로 호출부가 깨지면 관련 수정까지 묶어 검증하고 공통 코드만 먼저 반영하지 않는다. 최종 정식 실행에는 실제 세 프로그램만 사용한다. 위 검사는 구현 이후 수행할 기준이며 이번 문서 수정에서 실행한 결과가 아니다.
 
 ## 9. Git 작업 범위와 현재 저장소 확인
 
-2026-10-13 기준, 작업 시작점 `45c2851e5e7e5cb08f262a151cb608bc59be3d67`에서 확인한 현황이다.
+2026-10-13 기준 확인한 현황이다.
 
 - main 추적 파일 26개: HW1 Python 소스 6개, HW2 Java 소스 13개, README·제출 설명·로그 명세·gitignore. 전체 파일 목록, 소스의 import·클래스·공개 함수 구조, README의 역할·실행·협업 지침을 확인했다.
 - 원격 브랜치 23개, PR 25개 중 24개 병합·1개 열림. 별도 일반 이슈는 없고 원격 태그·릴리스도 없다. main에 Actions 워크플로 파일·AGENTS.md는 없다.
