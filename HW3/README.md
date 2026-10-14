@@ -174,8 +174,8 @@ PDF의 필수 동작·수치와 담당 내부의 자료구조·스레드 배치�
 | Buddy / Peer 포트 | `i mod 10 + 1` / `7000+i` |
 | HB / FD / POOL | 각각 1초 / 1초 / 5초 |
 | SUSPECT / DEAD | 마지막 HB 후 3초 이상 / 5초 이상 |
-| 첫 CRASH / 이후 간격 | READY 10개 시각 t0 후 10~20초 / 직전 CRASH 후 5~15초 |
-| RESTART / 주입 종료 | CRASH 후 10~15초 / t0 후 80초부터 새 CRASH 없음 |
+| 첫 CRASH / 이후 간격 | READY 10개 시각 t0 후 10–20초 / 직전 CRASH 후 5–15초 |
+| RESTART / 주입 종료 | CRASH 후 10–15초 / t0 후 80초부터 새 CRASH 없음 |
 | 재접속 / REJOIN 재시도 | 접속 거절 후 0.5초 / RETRY_LATER 후 2초, 아직 REJOINING일 때만 |
 | 정식 step delay / 예상 합계 | 100ms / 5,761,455 |
 
@@ -193,11 +193,11 @@ Socket별 UTF-8 수신 버퍼로 LF 단위 메시지를 자른다. 한 recv에 �
 | Launcher→Worker | 연결 첫 메시지 `LAUNCHER`, 이후 `CRASH`, `RESTART` |
 | Worker→Launcher | `READY i`, `REJOINED i` |
 
-범위: Worker i·j·d=1~10, Task k=0~999, epoch e≥1, CKPT s=1~9. ASSIGN epoch=1, TAKEOVER마다 Coordinator가 +1. RESULT 거부 순서는 DEAD→DONE→EPOCH이며 owner 불일치도 EPOCH로 거부한다.
+범위: Worker i·j·d=1–10, Task k=0–999, epoch e≥1, CKPT s=1–9. ASSIGN epoch=1, TAKEOVER마다 Coordinator가 +1. RESULT 거부 순서는 DEAD→DONE→EPOCH이며 owner 불일치도 EPOCH로 거부한다.
 
 Coordinator는 HELLO로 등록한 **도착 Socket**으로 메시지를 보낸 Worker를 판별한다. Worker는 타 Worker 생사를 판단하지 않으며 CKPT 경로와 HB 장애 판정을 섞지 않는다.
 
-Worker의 다음 REQ는 RESULT 송신 후 진행 Task·대기 Queue가 모두 없고 requested·no_task가 모두 False일 때 한 번만 보낸다. ASSIGN·NO_TASK에서 requested를 내린다. CKPT는 step 1~9 완료 뒤, RESULT는 step 10 완료 뒤 보낸다. 인계는 DEAD·SUSPECT를 건너뛴 다음 ALIVE이며, ALIVE가 전혀 없으면 첫 SUSPECT라는 명세의 예외 규칙을 적용한다.
+Worker의 다음 REQ는 RESULT 송신 후 진행 Task·대기 Queue가 모두 없고 requested·no_task가 모두 False일 때 한 번만 보낸다. ASSIGN·NO_TASK에서 requested를 내린다. CKPT는 step 1–9 완료 뒤, RESULT는 step 10 완료 뒤 보낸다. 인계는 DEAD·SUSPECT를 건너뛴 다음 ALIVE이며, ALIVE가 전혀 없으면 첫 SUSPECT라는 명세의 예외 규칙을 적용한다.
 
 ### 실행 명령 규약: 구현 예정
 
@@ -220,7 +220,7 @@ Launcher는 자신의 `sys.executable`을 사용하고 명령 인자를 리스�
 
 형식은 `[HH:MM:SS.mmm] NODE | EVENT | STATUS | message`, 시간대는 사용자 확정 규약에 따라 KST로 통일한다. 타임아웃·지연 계산에는 각 프로그램의 단조 시계를 사용하고, 로그 간 대조에는 동기화한 실제 시각을 사용한다.
 
-`message`는 JSON 객체로 기록한다. 모든 행에 `run_id`와 `ts_unix_ms`를 넣고 이벤트별 필드를 추가한다. 이 방식으로 검증 도구가 문장이나 필드 순서에 의존하지 않도록 한다. 파일은 `Coordinator.txt`, `Worker1.txt`~`Worker10.txt`, `Launcher.txt`다.
+`message`는 JSON 객체로 기록한다. 모든 행에 `run_id`와 `ts_unix_ms`를 넣고 이벤트별 필드를 추가한다. 이 방식으로 검증 도구가 문장이나 필드 순서에 의존하지 않도록 한다. 파일은 `Coordinator.txt`, `Worker1.txt`–`Worker10.txt`, `Launcher.txt`다.
 
 | EVENT | 최소 필드 |
 | --- | --- |
@@ -294,21 +294,7 @@ PR에는 독립 테스트 결과와 실제 연결 결과를 구분해 기록한�
 
 기능 PR을 통합할 때는 최신 기준 브랜치에 맞춘 뒤 단계별 연결 결과를 확인한다. 공통 변경으로 호출부가 깨지면 관련 수정까지 묶어 검증하고 공통 코드만 먼저 반영하지 않는다. 최종 정식 실행에는 실제 세 프로그램만 사용한다. 위 검사는 구현 이후 수행할 기준이며 이번 문서 수정에서 실행한 결과가 아니다.
 
-## 9. Git 작업 범위와 현재 저장소 확인
-
-2026-10-13 기준 확인한 현황이다.
-
-- main 추적 파일 26개: HW1 Python 소스 6개, HW2 Java 소스 13개, README·제출 설명·로그 명세·gitignore. 전체 파일 목록, 소스의 import·클래스·공개 함수 구조, README의 역할·실행·협업 지침을 확인했다.
-- 원격 브랜치 23개, PR 25개 중 24개 병합·1개 열림. 별도 일반 이슈는 없고 원격 태그·릴리스도 없다. main에 Actions 워크플로 파일·AGENTS.md는 없다.
-- HW2 개발 완료는 사용자가 확인했다. GitHub README에 남은 실측 빈칸을 새 측정값으로 채우거나 이번에 실행 성공했다고 판단하지 않았다.
-- [열린 PR #25](https://github.com/He6venly/Data_Communication/pull/25)는 HW2 README·제출 준비 안내다. HW3 설계와 별개이므로 이번 변경에 섞지 않는다.
-- HW2 README 14절의 지침: “기본 브랜치 직접 반영과 자동 병합은 하지 않는다.” 이후 작업은 기능별 브랜치와 한글 PR로 제출한다. 팀장 통합 확인 후 main에 반영한다.
-
-작업 브랜치 제안: `hw3/coordinator`, `hw3/worker`, `hw3/launcher-common`. 각자 자기 소유 경로만 커밋하고 PR에 변경·실행 명령·검증 결과·한계를 기록한다. 공통 README는 팀장이 취합한다. 로그·영상·실행 산출물·개인 환경은 제출 자료로 따로 관리한다.
-
-이번 변경은 Python 확정·설계·역할 배분 문서다. HW1·HW2 소스의 버그 검증, HW3 프로그램 구현·실행·원격 성능 측정은 수행하지 않았다.
-
-## 10. 제출물
+## 9. 제출물
 
 전체 Python 소스, `Readme.txt`, `AllDefinedLogs.txt`, 동일 원격 실행 로그 12개, 약 5분 시연 영상의 다운로드 링크가 담긴 `download.txt`를 `G2HW3.zip`으로 제출한다. Readme에는 조원·역할, 배포·실행 명령·시간대·seed, 장애 처리·동기화 설계, 실측 지표·정합성 결과를 기록한다.
 
