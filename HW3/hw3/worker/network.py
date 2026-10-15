@@ -86,8 +86,7 @@ class Worker:
         try:
             with self.send_gate:
                 with self.state.locked():
-                    if (self.state.mode != "RUNNING" or self.state.current is not None
-                            or self.state.queue or self.state.requested or self.state.no_task):
+                    if not self.state.needs_request():
                         return False
                     self.state.requested = True
                 self._write(self.coordinator, "REQ", (self.config.worker_id,))
@@ -170,7 +169,8 @@ class Worker:
         elif kind == "START" and self.state.start():
             self.emit("START", ring_ready=self.ring_ack_sent, started_at_unix_ms=int(time.time() * 1000))
             self.send_ready()
-        elif kind in {"ASSIGN", "TAKEOVER"} and mode == "RUNNING":
+        elif ((kind == "ASSIGN" and mode == "RUNNING")
+              or (kind == "TAKEOVER" and mode in {"RUNNING", "REJOINING"})):
             task, epoch = map(int, fields[:2])
             source = int(fields[2].split("=", 1)[1]) if kind == "TAKEOVER" else None
             if self.state.enqueue(Assignment(task, epoch, source), generation) and kind == "ASSIGN":

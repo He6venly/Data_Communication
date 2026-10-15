@@ -11,7 +11,7 @@
 - `state.py`: Queue → state → Store 순서의 Lock, CV, crash_gen 및 상태 전이.
 - `network.py`: Coordinator Control Recv, select 기반 Peer Server, 연결별 줄 버퍼와 송신 Lock.
 - `compute.py`: Compute 스레드 하나. 진행 Task 완료 후 인계 Task FIFO, step 1–9 CKPT, step 10 RESULT.
-- `heartbeat.py`: RUNNING의 1초 HB, REJOINING의 RETRY_LATER 이후 2초 재시도.
+- `heartbeat.py`: Condition Variable 상태 대기, RUNNING의 1초 HB, REJOINING의 RETRY_LATER 이후 2초 재시도.
 - `primes.py`: 작은 소수 1,229개를 이용한 구간 체. 명세의 양 끝 포함 범위를 계산한다.
 
 Main 외에 Control Recv·Peer Server·Compute·Heartbeat 네 스레드만 생성한다.
@@ -22,8 +22,15 @@ Buddy 송신 오류는 WARN 후 계산을 계속한다. Coordinator/Launcher 연
 
 상태는 `BOOTING → RUNNING → CRASHED → REJOINING → RUNNING`, 종료 시 `STOPPED`다.
 READY는 START와 Launcher 연결이 모두 갖춰졌을 때 한 번만 전송한다.
-재합류 후에는 WELCOME 이전에 HB·Compute·REQ를 보내지 않고 CKPT 수신만 허용한다.
-REJOINED와 새 REQ는 WELCOME 이후 전송한다. Worker가 epoch를 증가시키지 않는다.
+재합류 후에는 WELCOME 이전에 HB·Compute·REQ를 보내지 않는다. CKPT는 저장하고,
+먼저 도착한 TAKEOVER는 세대·epoch를 확인해 Queue에 보관한다. ASSIGN은 RUNNING에서만 수락한다.
+WELCOME 후에 보관한 인계 Task를 FIFO로 계산하며, 그 Task까지 모두 처리한 뒤 idle 조건에서 새 REQ를 보낸다.
+REJOINED는 WELCOME 이후 전송한다. Worker가 epoch를 증가시키지 않는다.
+
+Heartbeat는 Queue/CV Lock 안에서 상태·요청 조건과 타이머를 확인한 뒤 `Condition.wait()`한다.
+BOOTING·CRASHED와 REJOIN 응답을 기다리는 동안에는 타임아웃 없이 대기하고,
+RUNNING의 다음 HB와 RETRY_LATER 재시도에만 해당 마감 시각까지 timed wait한다.
+START·RESTART·WELCOME·작업 완료·BYE의 CV 통지로 깨어나므로 50ms 상태 폴링을 하지 않는다.
 
 Task별 CKPT는 `(epoch, step)`이 가장 큰 것 하나만 저장한다. TAKEOVER를 실제 계산할 때
 새 epoch보다 낮은 최신 CKPT의 다음 step과 partial로 재개한다. 없으면 step 1·partial 0이다.
@@ -73,7 +80,7 @@ python -m hw3.worker --id 1 --coord <REMOTE_IP>:4575 --peer-ip 127.0.0.1 --peer-
 
 ## 독립 검증 결과
 
-2026-10-14 로컬 Windows, Python 3.12.14에서 **23개 테스트 통과** (26.296초). 테스트 명령:
+2026-10-15 로컬 Windows, Python 3.12.14에서 **27개 테스트 통과** (27.727초). 테스트 명령:
 
 ```bash
 python -m unittest discover -s tests/worker -v
@@ -91,6 +98,8 @@ python -m unittest discover -s tests/worker -v
 - 실제 Worker 사이 CKPT 송수신, `W4 → W5 → W6` 및 `W10 → W1 → W2` 연속 crash.
   원래 Task와 대기 중 인계 Task를 모두 재인계하며, CKPT 소실 Task는 step 1부터 계산.
 - 반복 crash, RESTART/REJOIN/RETRY_LATER/WELCOME, REJOINING CKPT 수신과 HB·계산 중단.
+- WELCOME보다 먼저 도착한 TAKEOVER의 보관·중복 제거·FIFO·CKPT 재개, 같은 TCP 묶음의 TAKEOVER→WELCOME.
+- CRASHED Heartbeat의 타임아웃 없는 CV 대기와 BYE에 의한 종료.
 - READY의 양쪽 지연 순서, 메시지 분할/병합, 지연 ACK·stale 응답, NO_TASK 이후 TAKEOVER.
 - CRASH 직전 송신 경쟁: 진행 송신 완료 후 전환, 기다리던 이전 세대 송신 취소,
   송신 중 세 업무 Lock 획득 가능.

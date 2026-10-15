@@ -74,7 +74,11 @@ class WorkerState:
 
     def enqueue(self, assignment: Assignment, generation: int | None = None) -> bool:
         with self.locked():
-            if self.mode != "RUNNING" or (generation is not None and generation != self.crash_gen):
+            # Coordinator can make us ALIVE and send TAKEOVER before WELCOME arrives.
+            # Retain the assignment now; take_work still requires RUNNING.
+            accepting = (self.mode == "RUNNING"
+                         or (self.mode == "REJOINING" and assignment.from_worker is not None))
+            if not accepting or (generation is not None and generation != self.crash_gen):
                 return False
             if assignment.from_worker is None:
                 self.requested = False
@@ -85,6 +89,11 @@ class WorkerState:
             self.queue.append(assignment)
             self.cv.notify_all()
             return True
+
+    def needs_request(self) -> bool:
+        """Caller holds all state locks."""
+        return (self.mode == "RUNNING" and self.current is None and not self.queue
+                and not self.requested and not self.no_task)
 
     def save_checkpoint(self, task: int, checkpoint: Checkpoint) -> bool:
         with self.locked():

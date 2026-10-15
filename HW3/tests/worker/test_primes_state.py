@@ -72,6 +72,21 @@ class StateTests(unittest.TestCase):
         self.state.mark_no_task(generation=0)
         self.assertFalse(self.state.no_task)
 
+    def test_rejoining_queues_takeovers_but_rejects_assign_and_old_generation(self):
+        self.state.crash()
+        self.state.restart()
+        self.assertFalse(self.state.enqueue(Assignment(0, 1)))
+        self.assertFalse(self.state.enqueue(Assignment(0, 2, 4), generation=0))
+        self.assertTrue(self.state.enqueue(Assignment(0, 2, 4), generation=1))
+        self.assertFalse(self.state.enqueue(Assignment(0, 2, 4), generation=1))
+        self.assertTrue(self.state.enqueue(Assignment(152, 2, 4), generation=1))
+        self.assertEqual([a.task for a in self.state.queue], [0, 152])
+        self.assertIsNone(self.state.current)
+        self.assertFalse(self.state.requested)
+        self.state.welcome()
+        self.assertEqual(self.state.take_work().assignment.task, 0)
+        self.assertEqual(self.state.take_work().assignment.task, 152)
+
     def test_current_then_fifo_and_no_task_persists(self):
         self.state.enqueue(Assignment(0, 1))
         first = self.state.take_work()

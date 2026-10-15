@@ -16,6 +16,7 @@ from contract_double import install, Message, parse
 
 install()
 from hw3.worker.network import Channel, Worker, WorkerConfig
+from hw3.worker.heartbeat import heartbeat_loop
 from hw3.worker.primes import count_step
 
 
@@ -250,6 +251,42 @@ class RuntimeTests(unittest.TestCase):
         h.coord.send("START")
         self.assertEqual(h.launcher.quiet(), [])
 
+    def test_takeovers_before_welcome_wait_in_fifo_and_resume_checkpoint(self):
+        h = self.make()
+        prev = h.predecessor()
+        h.launcher.send("CRASH")
+        h.logger.wait("CRASH", crash_count=1)
+        h.coord.quiet()
+        h.launcher.send("RESTART")
+        h.coord.receive("REJOIN")
+        partial = sum(count_step(0, s) for s in range(1, 6))
+        prev.send(f"CKPT 0 1 5 {partial}")
+        h.logger.wait("CKPT", direction="receive", task=0, step=5)
+        h.coord.send("TAKEOVER 0 2 from=4\nTAKEOVER 152 2 from=4\nTAKEOVER 0 2 from=4")
+        with h.worker.state.cv:
+            self.assertTrue(h.worker.state.cv.wait_for(lambda: len(h.worker.state.queue) == 2, timeout=1))
+            self.assertEqual(h.worker.state.mode, "REJOINING")
+            self.assertIsNone(h.worker.state.current)
+        self.assertFalse(any(m.kind in {"RESULT", "HB", "REQ"} for m in h.coord.quiet()))
+        h.coord.send("WELCOME")
+        h.launcher.receive("REJOINED")
+        self.assertEqual([h.coord.receive("RESULT").fields for _ in range(2)],
+                         [("0", "2", "9592"), ("152", "2", "6075")])
+        self.assertEqual(h.logger.wait("TAKEOVER", task=0)["resume_step"], 6)
+        h.coord.receive("REQ")
+        h.coord.send("NO_TASK")
+        self.assertEqual(sum(m.kind == "REQ" for m in h.coord.history), 2)
+
+    def test_takeover_then_welcome_in_same_tcp_batch_is_not_lost(self):
+        h = self.make()
+        h.launcher.send("CRASH")
+        h.logger.wait("CRASH", crash_count=1)
+        h.launcher.send("RESTART")
+        h.coord.receive("REJOIN")
+        h.coord.send("TAKEOVER 152 2 from=4\nWELCOME")
+        h.launcher.receive("REJOINED")
+        self.assertEqual(h.coord.receive("RESULT").fields, ("152", "2", "6075"))
+
     def test_ready_waits_for_start(self):
         h = Harness()
         self.addCleanup(h.close)
@@ -298,6 +335,32 @@ class RuntimeTests(unittest.TestCase):
         h.coord.sock.shutdown(socket.SHUT_RDWR)
         self.assertTrue(h.worker.state.stop_event.wait(2))
         self.assertIsNotNone(h.worker.error)
+
+
+class HeartbeatWaitTests(unittest.TestCase):
+    def test_crashed_heartbeat_waits_on_cv_without_timeout_and_bye_wakes_it(self):
+        worker = Worker(WorkerConfig(1, ("localhost", 4575), "127.0.0.1", 7001, 100, "test", "."), MemoryLogger())
+        worker.state.start()
+        worker.state.crash()
+        entered = threading.Event()
+        timeouts = []
+        original_wait = worker.state.cv.wait
+        def observed_wait(timeout=None):
+            timeouts.append(timeout)
+            entered.set()
+            return original_wait(timeout)
+        worker.state.cv.wait = observed_wait
+        thread = threading.Thread(target=lambda: heartbeat_loop(worker))
+        thread.start()
+        try:
+            self.assertTrue(entered.wait(1), "Heartbeat never entered Condition.wait while CRASHED")
+            with worker.state.cv:
+                self.assertEqual(timeouts, [None])
+            self.assertEqual(worker.logger.records, [])
+        finally:
+            worker.handle_coordinator(Message("BYE", ()))
+            thread.join(2)
+        self.assertFalse(thread.is_alive())
 
 
 class SendBoundaryTests(unittest.TestCase):
