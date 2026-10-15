@@ -1,0 +1,32 @@
+HW3 Worker events (for team lead to combine into final AllDefinedLogs.txt)
+Common envelope: [HH:MM:SS.mmm] Worker{i} | EVENT | STATUS | JSON
+NodeLogger supplies KST time, run_id, ts_unix_ms. Worker adds worker=i.
+
+INIT INFO: node, pid, coordinator, peer_ip, peer_port, step_delay_ms, contract_version.
+CONNECT INFO/WARN: role=coordinator/buddy/peer/launcher, applicable host/ip/port/peer/buddy or error.
+RING INFO: buddy, ip, port. Fixed Buddy metadata received, not proof of connection.
+START INFO: ring_ready, started_at_unix_ms. START received and RUNNING entered.
+READY INFO: READY i sent after both START and Launcher identification. Exactly once.
+REQ INFO: REQ i sent while idle, not requested, and no_task=False.
+ASSIGN INFO: task, epoch. Assignment admitted into the local Queue.
+TAKEOVER INFO: task, epoch, from_worker, ckpt_epoch, resume_step, partial.
+  Actual Compute start/resume, not mere Queue admission. Missing CKPT: null, 1, 0.
+CKPT INFO/WARN: task, epoch, step, partial, direction=send/receive, optional buddy/error.
+  send INFO means send returned; not proof that Buddy stored it. receive means Store updated.
+HB INFO: HB i sent in RUNNING.
+RESULT SUCCESS: task, epoch, result. RESULT sent, not Coordinator Commit.
+ACK INFO: task. Coordinator ACK received; does not gate the next REQ.
+REJECT_STALE WARN: task, epoch, reason. Received reply does not modify pending/current work.
+  epoch is null if the reply cannot be unambiguously attributed from local sent-result evidence.
+NO_TASK INFO: request resolved; no_task remains True through later TAKEOVER until CRASH.
+CRASH INFO: crash_count, crash_gen, queue_cleared, store_cleared, current_task.
+  Transition complete, memory cleared, all existing TCP connections retained.
+RESTART INFO: CRASHED -> REJOINING. No HB or Compute yet.
+REJOIN INFO: rejoin_count. REJOIN i sent; not proof of Coordinator approval.
+RETRY_LATER INFO: received in REJOINING; schedules REJOIN after 2 seconds.
+WELCOME INFO: rejoin_count. Coordinator approval received, RUNNING entered.
+REJOINED INFO: rejoin_count. Launcher notified after WELCOME.
+PROTOCOL WARN: role, error. Invalid Coordinator line rejected.
+ERROR FAIL: error. Fatal runtime or required control connection failure, stopping.
+BYE INFO: Coordinator shutdown received, including in CRASHED.
+TERMINATE SUCCESS/FAIL: error (null on normal shutdown), threads_alive (must be 0).
