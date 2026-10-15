@@ -1,7 +1,7 @@
 # HW3 - Fault-Tolerant 협업 Worker Ring
 
 2026학년도 2학기 데이터통신 2조. **Python으로 확정**, HW2 코드는 재사용하지 않고 새로 구현한다.
-현재 상태: 설계 완료, 프로그램 구현 전. 제출 기한: **2026-10-26(월) 23:59**.
+현재 상태: Worker·Coordinator·로그 분석기 구현, 로컬 통합 검증 완료. 공통 모듈·Launcher는 별도 PR 반영 대기. 제출 기한: **2026-10-26(월) 23:59**.
 
 사용자 확정: **안선효 : 황대겸 : 황왕석 = 4 : 3 : 3**을 목표로 배분하며 AWS Coordinator TCP 포트는 **4575**다. 공통 규약 4항목은 2026-10-14 안선효가 기존 안 유지로 확정했으며 황왕석이 구현한다.
 
@@ -71,7 +71,7 @@
 
 ## 3. 제안 패키지·파일 구성
 
-아래는 **구현할 파일 구조**다. 이번 변경에서는 README 설계만 작성했고 소스 파일을 생성하지 않았다. 각 패키지에는 `__init__.py`를 둔다.
+아래는 담당별 패키지 구조다. Coordinator·Worker·tools는 구현했고, 공통·Launcher는 별도 담당 PR에 있다. 각 패키지에는 `__init__.py`를 둔다.
 
 ```text
 HW3/
@@ -126,7 +126,7 @@ Coordinator↔Worker, Worker→Buddy, Launcher↔Worker는 TCP로만 연결한�
 
 ### 사용자 확정 공통 규약: 4개
 
-아래 4항목과 이에 대응하는 API·메시지·CLI·로그 상세는 **2026-10-14 사용자 선택으로 확정**됐다. 현재 HW3 Python 소스는 없으며 `common/settings.py`, `common/protocol.py`, `common/transport.py`, `common/log.py`와 각 프로그램의 `__main__.py`에 구현할 계약이다.
+아래 4항목과 이에 대응하는 API·메시지·CLI·로그 상세는 **2026-10-14 사용자 선택으로 확정**됐다. `common/settings.py`, `common/protocol.py`, `common/transport.py`, `common/log.py`와 각 프로그램의 `__main__.py`가 따르는 계약이다.
 
 | 확정 항목 | 계약 |
 | --- | --- |
@@ -199,9 +199,9 @@ Coordinator는 HELLO로 등록한 **도착 Socket**으로 메시지를 보낸 Wo
 
 Worker의 다음 REQ는 RESULT 송신 후 진행 Task·대기 Queue가 모두 없고 requested·no_task가 모두 False일 때 한 번만 보낸다. ASSIGN·NO_TASK에서 requested를 내린다. CKPT는 step 1–9 완료 뒤, RESULT는 step 10 완료 뒤 보낸다. 인계는 DEAD·SUSPECT를 건너뛴 다음 ALIVE이며, ALIVE가 전혀 없으면 첫 SUSPECT라는 명세의 예외 규칙을 적용한다.
 
-### 실행 명령 규약: 구현 예정
+### 실행 명령
 
-명령은 `HW3` 폴더에서 실행한다. 아직 소스가 없어 아래 명령의 실행을 검증하지 않았다. IP·포트·seed는 인자로 전달한다. `run_id`는 양쪽에서 같은 값을 수동 지정해 동일 실행 로그를 묶는다.
+명령은 `HW3` 폴더에서 실행한다. Coordinator와 분석기는 실제 공통 모듈·Worker·Launcher를 연결한 별도 폴더에서 로컬 실행을 검증했다. 원격 AWS 실행은 미검증이며 공통·Launcher 담당 PR을 먼저 통합해야 한다. IP·포트·seed는 인자로 전달한다. `run_id`는 양쪽에서 같은 값을 수동 지정해 동일 실행 로그를 묶는다.
 
 ```bash
 # 원격 호스트
@@ -261,7 +261,7 @@ Coordinator의 elapsed_ms와 last_hb_elapsed_ms는 START 시각을 0으로 한 �
 - 시연용 출력 때문에 업무 Lock 안에서 I/O하거나 Coordinator에 허용되지 않은 로그 스레드를 추가하지 않는다. 필수 기록은 없애지 않고, 출력이 HB·FD·복구를 방해하지 않도록 구현한다.
 - 정식 영상과 제출 로그는 동일 원격 실행에서 얻는다. 개발용 수동 이웃 장애 실행은 별도로 구분하고 정식 무작위 장애 실행의 증거로 섞지 않는다. REJECT_STALE 등 실제 발생한 추가 경로만 설명한다.
 
-각 담당은 자기 이벤트의 가독성을 구현하면서 확인하고, 안선효는 실제 실행 로그로 위 동작을 찾아볼 수 있는지 최종 취합한다. 이 안내는 구현 기준이며 이번 문서 변경에서 시연·실행을 검증한 결과는 아니다.
+각 담당은 자기 이벤트의 가독성을 구현하면서 확인하고, 안선효는 실제 실행 로그로 위 동작을 찾아볼 수 있는지 최종 취합한다. 실제 수행한 검증 범위와 결과는 9절에 구분해 기록한다.
 
 ## 7. 핵심 동기화·장애 경계
 
@@ -292,9 +292,33 @@ Coordinator의 elapsed_ms와 last_hb_elapsed_ms는 START 시각을 0으로 한 �
 
 PR에는 독립 테스트 결과와 실제 연결 결과를 구분해 기록한다. 현재 단계의 실제 연결이 깨졌다면 해당 기능은 통합 미완료로 표시한다. 다음 단계로 넘어가기 전에 재현 로그로 원인을 좁히고 소유 담당이 수정한다. 여러 스레드·TCP 연결의 전역 메시지 순서를 하나로 고정하지 않고, Task별 owner·epoch·Commit 조건과 필요한 선후 관계를 검사한다.
 
-기능 PR을 통합할 때는 최신 기준 브랜치에 맞춘 뒤 단계별 연결 결과를 확인한다. 공통 변경으로 호출부가 깨지면 관련 수정까지 묶어 검증하고 공통 코드만 먼저 반영하지 않는다. 최종 정식 실행에는 실제 세 프로그램만 사용한다. 위 검사는 구현 이후 수행할 기준이며 이번 문서 수정에서 실행한 결과가 아니다.
+기능 PR을 통합할 때는 최신 기준 브랜치에 맞춘 뒤 단계별 연결 결과를 확인한다. 공통 변경으로 호출부가 깨지면 관련 수정까지 묶어 검증하고 공통 코드만 먼저 반영하지 않는다. 최종 정식 실행에는 실제 세 프로그램만 사용한다. 실제 수행한 검증 범위와 결과는 9절에 구분해 기록한다.
 
-## 9. 제출물
+## 9. Coordinator·로그 분석기 구현과 검증
+
+- Coordinator는 Main 외 Listener 1개·Dispatcher 6개·FD 1개만 만든다. 요청·상태·종료 대기는 Queue/Condition을 사용한다. 로그 전용 스레드는 없다.
+- RESULT의 Worker 상태는 Worker Table Lock에서 읽고, 해당 Task Lock에서 epoch·owner 확인과 Commit을 묶는다. REQ의 상태 확인·PENDING 추출·Task 배정은 Worker Table Lock 구간에서 원자적으로 처리한다.
+- 같은 Worker의 Dispatcher 처리는 Socket 송신 RLock으로 순서를 보호한다. 재합류 승인의 WELCOME보다 새 ASSIGN이 먼저 전송되는 경쟁을 막는다. 송신 중 Worker/Task 상태 Lock은 잡지 않는다.
+- FD는 START 전송 후 시작한다. 새 DEAD를 전부 표시한 뒤 번호순으로 모든 소유 Task를 재인계한다. 실제 TCP EOF는 가상 crash로 판정하지 않고 실행 오류로 종료한다.
+- `DEAD_SCAN`으로 해당 장애의 Task 순회 완료를 기록한다. 분석기는 이 시점에 미완료 소유 Task가 남지 않았는지 검사한다. FD가 해당 Task를 잠그기 전에 이미 진행 중이던 RESULT가 Commit된 경우는 인계 대상에서 제외한다.
+- `seq`와 `elapsed_ms`는 Coordinator가 상태를 판정한 순서·단조 시각이다. 파일 쓰기는 상태 Lock 밖이므로 행 순서가 달라도 분석기는 `seq`로 복원한다. 노드 사이에는 실제 시각·run_id·Task·epoch를 사용한다.
+- 마지막 Commit 후 Main이 VERIFY·장애별 SUMMARY·BYE·STOP 6개·스레드 join을 처리한다. 콘솔에는 주요 이벤트를 표시하고, `--quiet`여도 파일 로그는 모두 남긴다.
+
+분석기는 다른 프로그램 객체를 import하지 않고 동일 실행의 로그 12개만 읽는다. Task별 배정·재인계·Commit의 owner/epoch, Worker RESULT 대응, 전체 합계, 장애 상한·회차·재합류 및 정상 종료를 검사한다. 재인계된 Task의 복구 시간은 최종 Commit까지 추적하며 재개 로그가 없는 인계의 CKPT 절약 분자는 0이다. PASS는 로그 정합성 판정이며 물리적 원격 배포 증명은 별도다.
+
+```bash
+python -m hw3.tools.verify_logs --log-dir logs/hw3-run01 --run-id hw3-run01 --output logs/hw3-run01/analysis.json
+python -m unittest discover -s tests/coordinator -v
+python -m unittest discover -s tests/tools -v
+```
+
+`--allow-no-crashes`는 무장애 개발 로그에만 사용한다. 잘못된 파일·혼합 run_id·중복 Commit·오래된 owner/epoch·불완전 종료는 실패로 반환하며 CLI 종료 코드는 PASS=0, FAIL=1이다. 동일 run_id/로그 폴더를 재사용하지 않는다.
+
+현재 확인 결과는 Coordinator 테스트 11개, 분석기 테스트 16개 통과다. 별도 폴더에 실제 공통·Launcher 담당 소스를 연결한 **로컬** 100ms·seed 42 실행에서 Worker 10개, 장애 6회, 1,000 DONE·Commit 1,000개·이중 Commit 0·합계 5,761,455와 전체 정상 종료를 확인했다. 최종 실행시간 약 118.110초이며 동일 실행 로그 12개 분석은 PASS다. 이 자료는 AWS 정식 실행·영상의 증거로 사용하지 않는다.
+
+공통 로거의 Windows 표준 라이브러리 환경 KST 초기화 문제는 해당 담당 수정·통합 확인이 필요하다. 본 구현에 공통 대역 fallback을 넣거나 다른 담당 소스를 수정하지 않았다. AWS 배포·원격 정식 실행·영상·최종 ZIP은 남은 작업이다.
+
+## 10. 제출물
 
 전체 Python 소스, `Readme.txt`, `AllDefinedLogs.txt`, 동일 원격 실행 로그 12개, 약 5분 시연 영상의 다운로드 링크가 담긴 `download.txt`를 `G2HW3.zip`으로 제출한다. Readme에는 조원·역할, 배포·실행 명령·시간대·seed, 장애 처리·동기화 설계, 실측 지표·정합성 결과를 기록한다.
 
