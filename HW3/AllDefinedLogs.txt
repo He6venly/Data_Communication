@@ -1,0 +1,90 @@
+HW3 log contract
+Envelope: [HH:MM:SS.mmm] NODE | EVENT | STATUS | JSON
+KST; status=INFO/WARN/SUCCESS/FAIL. Every JSON record contains run_id, ts_unix_ms.
+Files: Coordinator.txt, Worker1.txt through Worker10.txt, Launcher.txt.
+Use a new run_id and log directory for each execution. No fabricated sample rows.
+
+Coordinator (NODE=COORD)
+Every record adds seq (decision order) and elapsed_ms (monotonic time since START;
+null before START). File writes happen outside business locks, so read by seq.
+INIT INFO: host, port, workers, dispatchers, task_locks, contract_version.
+CONNECT INFO: role, address. TCP accept only, not HELLO registration.
+HELLO INFO: worker, ip, port, registered. First accepted registration.
+RING INFO: workers. Fixed Buddy addresses sent after ten HELLO messages.
+RING_OK INFO: worker, ring_ready. Duplicate confirmations do not increase the count.
+START SUCCESS: ring_ready. Initial HB reference established, START broadcast begins.
+HB INFO: worker. Listener accepted a registered ALIVE/SUSPECT Worker's HB.
+ALIVE INFO: worker, reason=HB. SUSPECT recovery only; DEAD HB is ignored.
+REQ WARN: worker, reason. Request ignored when DEAD or not running.
+ASSIGN INFO: task, epoch=1, worker, rejoin_count. Owner was recorded before send.
+NO_TASK INFO: worker, pending=0, rejoin_count. No unassigned Task at request handling.
+RESULT INFO: task, epoch, worker, result. Received value, not proof of Commit.
+COMMIT SUCCESS: task, epoch, worker, result, commit_count, rejoin_count.
+  Task lock accepted the current epoch/owner exactly once.
+REJECT_STALE WARN: task, epoch, worker, result, reason=DEAD/DONE/EPOCH.
+SUSPECT INFO: worker, last_hb_elapsed_ms, detection_delay_ms. No ownership change.
+DEAD INFO: worker, crash_count, last_hb_elapsed_ms, detection_delay_ms,
+  owned_tasks, to_worker, dead_now. Newly DEAD workers are all marked first.
+TAKEOVER SUCCESS: task, old_epoch, epoch, from_worker, to_worker.
+  Ownership/epoch changed; send is not proof the receiver queued or resumed it.
+DEAD_SCAN INFO: worker, crash_count, owned_tasks. End of that DEAD ownership scan.
+  Every unfinished owned Task has moved. An in-flight RESULT may Commit before
+  its Task is scanned; it is then DONE and correctly excluded from owned_tasks.
+RETRY_LATER INFO: worker. REJOIN not approved; wire response asks retry in two seconds.
+REJOIN SUCCESS: worker, rejoin_count, pending. Worker Table approved this rejoin.
+WELCOME INFO: worker, rejoin_count. Approval prepared before wire send.
+PROTOCOL WARN: message, optional worker/message_kind/error. Invalid/unregistered input.
+POOL INFO: queue, pending, assigned, done, alive, commits, double_commit, sum,
+  all_commit_once, min_commit_count, max_commit_count. Periodic snapshot.
+VERIFY SUCCESS/FAIL: final Task snapshot above plus pass. Not remote-deployment proof.
+SUMMARY INFO: execution_ms, throughput, faults[], rejoins[]. Fault recovery tracks
+  final Commit even after another takeover; no owned tasks gives null recovery.
+BYE INFO: worker. Shutdown command sent successfully; not proof of process exit.
+ERROR FAIL: error. Abort including registered TCP EOF outside final shutdown.
+TERMINATE SUCCESS/FAIL: error, threads_alive. All Coordinator threads joined.
+
+Worker (NODE=Worker{i})
+Worker adds worker=i. Event definitions correspond to the Worker implementation.
+INIT INFO: node, pid, coordinator, peer_ip, peer_port, step_delay_ms, contract_version.
+CONNECT INFO/WARN: role, applicable host/ip/port/peer/buddy or error.
+RING INFO: buddy, ip, port. Address received, not connection proof.
+START INFO: ring_ready, started_at_unix_ms. RUNNING entered.
+READY INFO: READY i sent once after START and Launcher identification.
+REQ INFO: Request sent while idle, not requested, and no_task=False.
+ASSIGN INFO: task, epoch. Added to local Queue.
+TAKEOVER INFO: task, epoch, from_worker, ckpt_epoch, resume_step, partial.
+  Actual computation starts/resumes; missing CKPT gives null, 1, 0.
+CKPT INFO/WARN: task, epoch, step, partial, direction=send/receive, optional buddy/error.
+  Send return does not prove Buddy storage. Receive means Store updated.
+HB INFO: HB sent while RUNNING.
+RESULT SUCCESS: task, epoch, result. Sent value, not Coordinator Commit.
+ACK INFO: task. Does not gate the next REQ.
+REJECT_STALE WARN: task, epoch, reason. Ambiguous epoch is null; no state mutation.
+NO_TASK INFO: Requested resolved; remains set until CRASH, including after TAKEOVER.
+CRASH INFO: crash_count, crash_gen, queue_cleared, store_cleared, current_task.
+  Memory invalidated, existing TCP retained, normal sending stopped.
+RESTART INFO: CRASHED to REJOINING; computation and HB still wait.
+REJOIN INFO: rejoin_count. Sent request, not approval proof.
+RETRY_LATER INFO: Retry after two seconds only if still REJOINING.
+WELCOME INFO: rejoin_count. Approval received, RUNNING entered.
+REJOINED INFO: rejoin_count. Launcher notified after WELCOME.
+PROTOCOL WARN: role, error. Invalid Coordinator line.
+ERROR FAIL: error. Fatal runtime/control connection failure.
+BYE INFO: Shutdown received even while CRASHED.
+TERMINATE SUCCESS/FAIL: error, threads_alive. Worker threads joined.
+
+Launcher (NODE=LAUNCHER)
+INIT INFO: contract_version, seed, workers, coord, peer_ip, peer_base, step_delay_ms.
+PROCESS_START SUCCESS: worker, pid, peer_port. Created an independent process.
+CONNECT SUCCESS: worker, peer_ip, peer_port. Sent LAUNCHER identification.
+READY SUCCESS: worker, ready_count; tenth unique READY adds t0_monotonic,
+  first_crash_in_ms. This starts the random schedule.
+CRASH INFO: worker, crash_count, candidates, down, downtime_ms. CRASH sent.
+RESTART INFO: worker, crash_count, down. RESTART sent, still counted as down.
+REJOINED SUCCESS: worker, crash_count, down. Worker confirmed rejoin.
+EOF INFO: worker, state=EXITED, down. Control EOF, scheduled restart cancelled.
+INJECTION_END INFO: elapsed_ms. New CRASH stopped; pending recovery continues.
+SEND FAIL: worker, command, error. Failed control send, handled as EOF.
+PROTOCOL WARN: worker, optional line/message/reason/error. Invalid control input.
+TERMINATE SUCCESS: exited_workers. All ten control connections reached EXITED.
+TERMINATE FAIL: error_type, error. Launcher failure and owned-process cleanup.
