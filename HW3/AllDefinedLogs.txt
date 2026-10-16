@@ -34,8 +34,10 @@ RETRY_LATER INFO: worker. REJOIN not approved; wire response asks retry in two s
 REJOIN SUCCESS: worker, rejoin_count, pending. Worker Table approved this rejoin.
 WELCOME INFO: worker, rejoin_count. Approval prepared before wire send.
 PROTOCOL WARN: message, optional worker/message_kind/error. Invalid/unregistered input.
-POOL INFO: queue, pending, assigned, done, alive, commits, double_commit, sum,
+POOL INFO: queue, pending, assigned, done, alive, alive_workers, suspect_workers,
+  dead_workers, commits, double_commit, sum,
   all_commit_once, min_commit_count, max_commit_count. Periodic snapshot.
+  alive is the count; *_workers are ordered Worker-ID lists read under one lock.
 VERIFY SUCCESS/FAIL: final Task snapshot above plus pass. Not remote-deployment proof.
 SUMMARY INFO: execution_ms, throughput, faults[], rejoins[]. Fault recovery tracks
   final Commit even after another takeover; no owned tasks gives null recovery.

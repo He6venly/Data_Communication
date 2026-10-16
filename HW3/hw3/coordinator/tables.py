@@ -244,9 +244,13 @@ class Tables:
                 commits.append(task.commit_count)
                 results.append(task.result or 0)
         with self.lock:
-            alive = sum(w.state == "ALIVE" for w in self.workers.values())
+            alive_workers = [i for i, w in self.workers.items() if w.state == "ALIVE"]
+            suspect_workers = [i for i, w in self.workers.items() if w.state == "SUSPECT"]
+            dead_workers = [i for i, w in self.workers.items() if w.state == "DEAD"]
         return {"pending": counts["PENDING"], "assigned": counts["ASSIGNED"], "done": counts["DONE"],
-                "alive": alive, "commits": sum(commits), "double_commit": sum(c > 1 for c in commits),
+                "alive": len(alive_workers), "alive_workers": alive_workers,
+                "suspect_workers": suspect_workers, "dead_workers": dead_workers,
+                "commits": sum(commits), "double_commit": sum(c > 1 for c in commits),
                 "sum": sum(results), "all_commit_once": all(c == 1 for c in commits),
                 "min_commit_count": min(commits), "max_commit_count": max(commits)}
 

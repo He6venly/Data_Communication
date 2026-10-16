@@ -1,3 +1,5 @@
+from contextlib import redirect_stdout
+import io
 import socket
 import threading
 import time
@@ -19,6 +21,29 @@ class Logger:
 
 
 class RuntimeTests(unittest.TestCase):
+    def test_console_filter_preserves_full_log_and_quiet_suppresses_only_console(self):
+        logger = Logger()
+        app = Coordinator("127.0.0.1", 0, logger)
+        events = []
+        events.append(app.tables.event("REJOIN", "SUCCESS", worker=4, rejoin_count=1, pending=700))
+        for task in (300, 301):
+            events.append(app.tables.event("ASSIGN", task=task, epoch=1, worker=4, rejoin_count=1))
+            events.append(app.tables.event("COMMIT", "SUCCESS", task=task, epoch=1, worker=4,
+                                           rejoin_count=1, commit_count=1, result=6000))
+        stream = io.StringIO()
+        with redirect_stdout(stream):
+            app.publish(events)
+        self.assertEqual(len(logger.records), len(events))
+        self.assertIn("Task=300", stream.getvalue())
+        self.assertIn("반영 완료", stream.getvalue())
+        self.assertNotIn("Task=301", stream.getvalue())
+        app.console = False
+        stream = io.StringIO()
+        with redirect_stdout(stream):
+            app.publish(events)
+        self.assertEqual(stream.getvalue(), "")
+        self.assertEqual(len(logger.records), 2*len(events))
+
     def test_rejoin_reply_precedes_racing_req_without_state_locks_during_send(self):
         app = Coordinator("127.0.0.1", 0, Logger(), console=False)
         entered, release = threading.Event(), threading.Event()
