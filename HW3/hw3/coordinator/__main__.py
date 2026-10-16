@@ -1,11 +1,66 @@
 """python -m hw3.coordinator --host 0.0.0.0 --port 4575 ..."""
 
 import argparse
+from datetime import datetime, timedelta, timezone
+import json
 from pathlib import Path
 import queue
 import socket
 import sys
 import threading
+
+
+def worker_list(values):
+    return "["+" ".join(f"W{i}" for i in values)+"]"
+
+
+def console_message(event):
+    """Compact presentation of actual decisions; complete JSON stays in files."""
+    f, kind = event.fields, event.kind
+    if kind == "POOL":
+        return (f"DONE={f['done']}/1000 | PENDING={f['pending']} | ASSIGNED={f['assigned']} | QUEUE={f['queue']}\n"
+                f"    ALIVE({f['alive']})={worker_list(f['alive_workers'])} "
+                f"SUSPECT={worker_list(f['suspect_workers'])} DEAD={worker_list(f['dead_workers'])}")
+    if kind == "INIT":
+        return (f"{f['host']}:{f['port']} | Worker={f['workers']} | Dispatcher={f['dispatchers']} "
+                f"| Task Lock={f['task_locks']}")
+    if kind == "RING":
+        return f"Buddy 주소 전송 완료 | Worker={f['workers']}"
+    if kind == "START":
+        return f"RING_OK={f['ring_ready']}/10 | 계산 시작 허용"
+    if kind == "SUSPECT":
+        return f"W{f['worker']} | HB 없음 {f['detection_delay_ms']/1000:.2f}s | SUSPECT (인계 없음)"
+    if kind == "ALIVE":
+        return f"W{f['worker']} | HB 회복 -> ALIVE"
+    if kind == "DEAD":
+        return (f"W{f['worker']} | HB 없음 {f['detection_delay_ms']/1000:.2f}s | DEAD | 인계 대상 W{f['to_worker']}\n"
+                f"    소유 Task={f['owned_tasks']} | DEAD={worker_list(f['dead_now'])}")
+    if kind == "TAKEOVER":
+        return (f"Task={f['task']} | 소유권 W{f['from_worker']} -> W{f['to_worker']} "
+                f"| epoch={f['old_epoch']} -> {f['epoch']}")
+    if kind == "REJOIN":
+        return f"W{f['worker']} | 재합류 승인 #{f['rejoin_count']} -> ALIVE | PENDING={f['pending']}"
+    if kind == "ASSIGN":
+        label = f"재합류 #{f['rejoin_count']} 첫 새 배정" if f['rejoin_count'] else "초기 배정"
+        return (f"W{f['worker']} | {label} "
+                f"| Task={f['task']} | epoch={f['epoch']}")
+    if kind == "COMMIT":
+        return (f"Task={f['task']} | W{f['worker']} | epoch={f['epoch']} "
+                f"| 반영 완료 | commit_count={f['commit_count']} | result={f['result']:,}")
+    if kind == "NO_TASK":
+        return f"W{f['worker']} | 재합류 #{f['rejoin_count']} | PENDING=0 | 인계 또는 종료 대기"
+    if kind == "VERIFY":
+        result = "PASS" if f['pass'] else "FAIL"
+        once = "PASS" if f['all_commit_once'] else "FAIL"
+        return (f"{result} | DONE={f['done']}/1000 | COMMIT={f['commits']} | DOUBLE_COMMIT={f['double_commit']}\n"
+                f"    SUM={f['sum']:,} | 모든 Task commit_count=1 검사: {once}")
+    if kind == "ERROR":
+        return f"실행 오류 | {f['error']}"
+    if kind == "TERMINATE":
+        state = "정상 종료" if event.status == "SUCCESS" else "종료 실패"
+        return f"{state} | 남은 Thread={f['threads_alive']} | error={f['error']}"
+    return json.dumps(f, ensure_ascii=False, separators=(",", ":"))
+
 
 class Coordinator:
     def __init__(self, host, port, logger, *, console=True):
@@ -19,6 +74,7 @@ class Coordinator:
         self.started = threading.Event()
         self.detector_stop = threading.Event()
         self.output_lock = threading.Lock()
+        self.console_rejoin_tasks = {}
         self.failure_lock = threading.Lock()
         self.error = None
         self.server = None
@@ -28,11 +84,30 @@ class Coordinator:
         for event in events:
             with self.output_lock:
                 self.logger.write(event.kind, event.status, event.fields)
-                if self.console and event.kind in {"INIT", "RING", "START", "POOL", "SUSPECT", "DEAD",
-                                                   "TAKEOVER", "REJOIN", "VERIFY", "ERROR", "TERMINATE"}:
-                    import json
-                    print(f"COORD | {event.kind} | {event.status} | "
-                          + json.dumps(event.fields, ensure_ascii=False, separators=(",", ":")), flush=True)
+                if not self.console:
+                    continue
+                show = event.kind in {"INIT", "RING", "START", "POOL", "SUSPECT", "ALIVE", "DEAD",
+                                      "TAKEOVER", "REJOIN", "VERIFY", "ERROR", "TERMINATE"}
+                if event.kind in {"ASSIGN", "NO_TASK"} and event.fields.get("rejoin_count", 0) > 0:
+                    cycle = (event.fields["worker"], event.fields["rejoin_count"])
+                    show = cycle not in self.console_rejoin_tasks
+                    if show:
+                        self.console_rejoin_tasks[cycle] = event.fields.get("task")
+                elif event.kind == "ASSIGN":
+                    show = event.fields["task"] < 10
+                elif event.kind == "COMMIT":
+                    f = event.fields
+                    show = (f["task"] < 10 or f["epoch"] > 1 or
+                            self.console_rejoin_tasks.get((f["worker"], f["rejoin_count"])) == f["task"])
+                if show:
+                    now = datetime.now(timezone(timedelta(hours=9)))
+                    clock = now.strftime("%H:%M:%S.")+f"{now.microsecond//1000:03d}"
+                    elapsed = event.fields.get("elapsed_ms")
+                    prefix = "" if elapsed is None else f"t={elapsed/1000:.1f}s | "
+                    message = console_message(event)
+                    if event.kind == "INIT":
+                        message += f"\n    run_id={getattr(self.logger, 'run_id', '')} | 시각=KST"
+                    print(f"[{clock}] COORD | {event.kind} | {event.status} | {prefix}{message}", flush=True)
 
     def emit(self, kind, status="INFO", **fields):
         self.publish([self.tables.event(kind, status, **fields)])

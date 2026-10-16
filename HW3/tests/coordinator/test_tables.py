@@ -33,12 +33,21 @@ class TablesTests(unittest.TestCase):
         events, _ = self.tables.detect()
         self.assertEqual([r.kind for r in events], ["SUSPECT"])
         self.assertEqual(self.tables.workers[4].state, "SUSPECT")
+        snapshot = self.tables.snapshot()
+        self.assertEqual(snapshot["suspect_workers"], [4])
+        self.assertNotIn(4, snapshot["alive_workers"])
+        self.assertEqual(snapshot["alive"], len(snapshot["alive_workers"]))
         self.tables.heartbeat(4)
         self.assertEqual(self.tables.workers[4].state, "ALIVE")
+        self.assertIn(4, self.tables.snapshot()["alive_workers"])
         self.now = 8
         self.alive_except(4)
         self.tables.detect()
         self.assertEqual(self.tables.workers[4].state, "DEAD")
+        snapshot = self.tables.snapshot()
+        self.assertEqual(snapshot["dead_workers"], [4])
+        self.assertNotIn(4, snapshot["alive_workers"])
+        self.assertEqual(snapshot["suspect_workers"], [])
         self.assertEqual(self.tables.heartbeat(4), [])
 
     def test_rejection_order_and_current_epoch_owner(self):

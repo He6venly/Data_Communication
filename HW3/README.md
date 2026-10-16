@@ -1,7 +1,7 @@
 # HW3 - Fault-Tolerant 협업 Worker Ring
 
 2026학년도 2학기 데이터통신 2조. **Python으로 확정**, HW2 코드는 재사용하지 않고 새로 구현한다.
-현재 상태: Worker·Coordinator·로그 분석기 구현, 로컬 통합 검증 완료. 공통 모듈·Launcher는 별도 PR 반영 대기. 제출 기한: **2026-10-26(월) 23:59**.
+현재 상태: 공통 모듈·Coordinator·Worker·Launcher·로그 분석기 통합 및 로컬 검증 완료. AWS 원격 정식 실행·영상·제출물 준비는 남아 있다. 제출 기한: **2026-10-26(월) 23:59**.
 
 사용자 확정: **안선효 : 황대겸 : 황왕석 = 4 : 3 : 3**을 목표로 배분하며 AWS Coordinator TCP 포트는 **4575**다. 공통 규약 4항목은 2026-10-14 안선효가 기존 안 유지로 확정했으며 황왕석이 구현한다.
 
@@ -233,7 +233,7 @@ Launcher는 자신의 `sys.executable`을 사용하고 명령 인자를 리스�
 | RESULT / COMMIT | task, epoch, worker, result; COMMIT은 commit_count |
 | REJOIN / WELCOME | worker, rejoin_count |
 | REJECT_STALE | task, epoch, worker, reason |
-| POOL / VERIFY | queue·pending·assigned·done·alive / done·commits·double_commit·sum·pass |
+| POOL / VERIFY | queue·pending·assigned·done·alive·alive_workers·suspect_workers·dead_workers / done·commits·double_commit·sum·pass |
 
 RING·CONNECT·CKPT·HB·TERMINATE와 추가 이벤트도 `AllDefinedLogs.txt`에 정의한다. Launcher 장애 회차와 Coordinator 감지 회차는 **Worker 번호와 반복 순서**로 대조한다. Coordinator가 Launcher의 crash 스케줄을 알게 만들지 않는다.
 
@@ -248,7 +248,7 @@ Coordinator의 elapsed_ms와 last_hb_elapsed_ms는 START 시각을 0으로 한 �
 | 확인할 동작 | 화면에서 찾기 쉬워야 할 정보 |
 | --- | --- |
 | 실행 구성·시작 | 원격 Coordinator 주소·TCP 4575, 로컬 Worker별 id·PID·Peer 포트, 실제 Dispatcher 수·Task별 Lock 수. HELLO 10개 → RING → RING_OK 10개 → START, READY 10개 |
-| 정상 계산·진행 | ASSIGN의 Task·epoch·Worker, CKPT의 step·partial, RESULT·COMMIT. POOL은 pending·assigned·done을 동일한 순서로 표시 |
+| 정상 계산·진행 | ASSIGN의 Task·epoch·Worker, CKPT의 step·partial, RESULT·COMMIT. POOL에는 진행 수와 ALIVE·SUSPECT·DEAD Worker 번호 목록 표시 |
 | 가상 crash·장애 감지 | Launcher의 victim·장애 회차·down 목록과 CRASHED+REJOINING 수, Worker의 CRASH 전환·기억 초기화. Coordinator의 SUSPECT → DEAD와 마지막 HB 기준 경과시간 |
 | 인계·CKPT 재개 | 동일 Task의 from/to Worker·old/new epoch, Worker의 ckpt_epoch·resume_step·초기 partial. CKPT가 없으면 step 1·partial 0임을 명시 |
 | 반복·연속 Buddy 장애 | 재인계된 Task도 Task 번호로 이어서 추적. 죽은 Worker의 원래 Task와 인계받은 Task가 모두 이동했는지 확인 가능하게 기록 |
@@ -303,6 +303,10 @@ PR에는 독립 테스트 결과와 실제 연결 결과를 구분해 기록한�
 - `DEAD_SCAN`으로 해당 장애의 Task 순회 완료를 기록한다. 분석기는 이 시점에 미완료 소유 Task가 남지 않았는지 검사한다. FD가 해당 Task를 잠그기 전에 이미 진행 중이던 RESULT가 Commit된 경우는 인계 대상에서 제외한다.
 - `seq`와 `elapsed_ms`는 Coordinator가 상태를 판정한 순서·단조 시각이다. 파일 쓰기는 상태 Lock 밖이므로 행 순서가 달라도 분석기는 `seq`로 복원한다. 노드 사이에는 실제 시각·run_id·Task·epoch를 사용한다.
 - 마지막 Commit 후 Main이 VERIFY·장애별 SUMMARY·BYE·STOP 6개·스레드 join을 처리한다. 콘솔에는 주요 이벤트를 표시하고, `--quiet`여도 파일 로그는 모두 남긴다.
+- POOL의 기존 `alive` 개수는 유지하고 `alive_workers`, `suspect_workers`, `dead_workers` 번호 목록을 추가한다. 세 목록은 동일 Worker Table Lock 구간에서 읽는다.
+- 시연 콘솔은 KST 시각·START 이후 경과시간과 함께 읽기 쉬운 요약을 표시한다. POOL은 진행 수와 Worker 상태를 두 줄로, VERIFY는 PASS/FAIL·Commit 수와 합계·각 commit_count 검증을 두 줄로 표시한다. INIT에는 run_id·Dispatcher 수·Task Lock 수를 보여 준다.
+- 초기 Task 0–9의 배정·Commit, 장애 Worker·HB 부재 시간, 인계 Task·from/to Worker·old/new epoch와 해당 Commit을 표시한다. 재합류는 회차별 첫 새 배정과 그 Task의 Commit을 표시한다. 반복 ASSIGN·HB·CKPT 상세는 파일에서 확인한다. 콘솔의 인계·배정 표시는 Coordinator의 소유권 판정이며 실제 Worker 재개는 Worker 로그의 TAKEOVER로 확인한다.
+- 파일은 기존 KST·UTF-8·한 행당 텍스트+JSON 형식을 유지한다. 여러 줄의 콘솔 요약은 출력 Lock 안에서 하나의 블록으로 출력한다. 업무 Lock 안에서 I/O하지 않고 로그 스레드도 추가하지 않는다.
 
 분석기는 다른 프로그램 객체를 import하지 않고 동일 실행의 로그 12개만 읽는다. Task별 배정·재인계·Commit의 owner/epoch, Worker RESULT 대응, 전체 합계, 장애 상한·회차·재합류 및 정상 종료를 검사한다. 재인계된 Task의 복구 시간은 최종 Commit까지 추적하며 재개 로그가 없는 인계의 CKPT 절약 분자는 0이다. PASS는 로그 정합성 판정이며 물리적 원격 배포 증명은 별도다.
 
@@ -314,9 +318,11 @@ python -m unittest discover -s tests/tools -v
 
 `--allow-no-crashes`는 무장애 개발 로그에만 사용한다. 잘못된 파일·혼합 run_id·중복 Commit·오래된 owner/epoch·불완전 종료는 실패로 반환하며 CLI 종료 코드는 PASS=0, FAIL=1이다. 동일 run_id/로그 폴더를 재사용하지 않는다.
 
-현재 확인 결과는 Coordinator 테스트 11개, 분석기 테스트 16개 통과다. 별도 폴더에 실제 공통·Launcher 담당 소스를 연결한 **로컬** 100ms·seed 42 실행에서 Worker 10개, 장애 6회, 1,000 DONE·Commit 1,000개·이중 Commit 0·합계 5,761,455와 전체 정상 종료를 확인했다. 최종 실행시간 약 118.110초이며 동일 실행 로그 12개 분석은 PASS다. 이 자료는 AWS 정식 실행·영상의 증거로 사용하지 않는다.
+현재 변경에 대해 Coordinator 테스트 12개, 분석기 테스트 16개가 통과했다. 실제 전체본의 **로컬** 100ms·seed 42 실행에서 Worker 10개, 장애 6회, 1,000 DONE·Commit 1,000개·이중 Commit 0·합계 5,761,455와 전체 정상 종료를 다시 확인했다. 최신 실행시간 약 119.562초이며 동일 실행 로그 12개 분석은 PASS다. POOL 24건의 세 상태 목록·개수 일치와 시연 콘솔의 배정·인계·재합류·Commit·최종 PASS 표시도 확인했다. 이 자료는 AWS 정식 실행·영상의 증거로 사용하지 않는다.
 
-공통 로거의 Windows 표준 라이브러리 환경 KST 초기화 문제는 해당 담당 수정·통합 확인이 필요하다. 본 구현에 공통 대역 fallback을 넣거나 다른 담당 소스를 수정하지 않았다. AWS 배포·원격 정식 실행·영상·최종 ZIP은 남은 작업이다.
+전체본의 모듈별 검증 결과는 공통 16개·Launcher 17개·Worker 27개·Coordinator 12개·분석기 16개, 고유 테스트 88개 통과다. 이번 변경에서는 Coordinator·분석기를 재검증하고, 앞서 통과한 다른 모듈의 구현·테스트는 유지했다. Worker는 실제 공통 API와 실행 진입점으로도 호환 검증했다. 정상·무작위 장애와 개발용 수동 W4→W5→W6 / W10→W1→W2 실행에서 각각 1,000 Task 완료·중복 Commit 0·동일 합계·정상 종료를 확인했다. 수동 실행에서는 원래 Task와 인계 Task의 재인계 및 epoch 1→2→3, CKPT 유실 후 step 1·partial 0 재시작을 확인했다.
+
+공통 로거는 표준 라이브러리의 고정 UTC+9 시간대를 사용하며 Windows에서도 외부 시간대 데이터 없이 KST 기록이 검증됐다. AWS 배포·원격 정식 실행·영상·최종 ZIP은 남은 작업이다.
 
 ## 10. 제출물
 
