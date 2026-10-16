@@ -3,9 +3,10 @@ import re
 import tempfile
 import threading
 import unittest
+from datetime import timedelta
 from pathlib import Path
 
-from hw3.common.log import NodeLogger
+from hw3.common.log import NodeLogger, _KST
 
 
 LINE_RE = re.compile(
@@ -14,6 +15,10 @@ LINE_RE = re.compile(
 
 
 class LoggerTests(unittest.TestCase):
+    def test_kst_does_not_require_external_timezone_data(self) -> None:
+        self.assertEqual(timedelta(hours=9), _KST.utcoffset(None))
+        self.assertEqual("KST", _KST.tzname(None))
+
     def test_kst_json_format_and_required_fields(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "Launcher.txt"

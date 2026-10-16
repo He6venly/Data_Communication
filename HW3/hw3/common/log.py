@@ -5,13 +5,12 @@ from __future__ import annotations
 import json
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from collections.abc import Mapping
-from zoneinfo import ZoneInfo
 
 
-_KST = ZoneInfo("Asia/Seoul")
+_KST = timezone(timedelta(hours=9), name="KST")
 _STATUSES = {"SUCCESS", "FAIL", "INFO", "WARN"}
 
 
