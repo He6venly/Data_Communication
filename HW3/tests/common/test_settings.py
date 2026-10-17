@@ -1,3 +1,5 @@
+# 공통 설정값을 테스트한다.
+
 import unittest
 
 from hw3.common import settings

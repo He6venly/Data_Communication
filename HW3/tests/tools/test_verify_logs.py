@@ -1,3 +1,5 @@
+# 로그 정합성 검사와 복구 지표 계산을 테스트한다.
+
 import json
 from pathlib import Path
 import tempfile
@@ -22,7 +24,7 @@ class LogTests(unittest.TestCase):
         self.rows["Launcher"].insert(0, self.row("Launcher", "INIT"))
         self.add("Coordinator", "START", ring_ready=10)
         for k in range(1000):
-            value = 5761455 if k == 0 else 0  # Synthetic log fixture, not measured prime results.
+            value = 5761455 if k == 0 else 0
             self.add("Coordinator", "ASSIGN", task=k, epoch=1, worker=1, rejoin_count=0)
             self.add("Worker1", "RESULT", task=k, epoch=1, result=value)
             self.add("Coordinator", "COMMIT", task=k, epoch=1, worker=1, result=value,
@@ -55,7 +57,6 @@ class LogTests(unittest.TestCase):
         return verify(self.root, "fixture", allow_no_crashes=True)
 
     def test_complete_development_run_and_seq_order_not_file_order(self):
-        # Writes from different dispatcher threads can reach the logger out of order.
         self.rows["Coordinator"][25:40] = reversed(self.rows["Coordinator"][25:40])
         report = self.check()
         self.assertTrue(report["pass"], report["errors"])
@@ -82,7 +83,6 @@ class LogTests(unittest.TestCase):
 
     def test_three_concurrent_crashes_rejected(self):
         for i in range(1, 4):
-            # Insert before EOF events, preserving the Launcher's actual event order.
             self.rows["Launcher"].insert(10+i, self.row("Launcher", "CRASH", worker=i,
                                                        crash_count=1, down=list(range(1, i+1))))
         self.assertIn("Launcher concurrent CRASHED+REJOINING exceeds two", self.check()["errors"])

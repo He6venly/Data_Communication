@@ -1,9 +1,4 @@
-# HW3 Worker — 황대겸 담당 구현
-
-기준: `main`의 `fc357c6` 및 `HW3/README.md`에 확정된 규약. 변경 범위는
-`hw3/worker/`와 `tests/worker/`다. Coordinator·Launcher·공통 모듈은 다른 담당의 구현을 사용한다.
-루트 `hw3/__init__.py`도 공통 담당 소유이므로 여기서 생성하지 않았다.
-현재 Python의 namespace package로 Worker를 찾을 수 있고, 공통 담당이 초기화 파일을 추가해도 동작한다.
+# HW3 Worker
 
 ## 구성과 동작
 
@@ -66,29 +61,22 @@ Python 3.12 이상, 표준 라이브러리만 사용한다. `HW3`에서 실행�
 python -m hw3.worker --id 1 --coord <REMOTE_IP>:4575 --peer-ip 127.0.0.1 --peer-port 7001 --step-delay 100 --run-id hw3-run01 --log-dir logs/hw3-run01
 ```
 
-실제 실행에는 황왕석 담당의 다음 공통 API가 필요하다.
+Worker는 다음 공통 API를 사용한다.
 
 - `common.protocol`: Message, ProtocolError, encode, parse
 - `common.transport`: LineBuffer, send_line
 - `common.log`: NodeLogger
 - `common.settings`: CONTRACT_VERSION
 
-공통 모듈이 없으면 설명을 출력하고 종료 코드 2로 끝낸다. 제품에는 공통 대역을 연결하지 않는다.
-공통 settings의 개별 수치 상수 이름은 원문 README에 지정되지 않았으므로 새로운 API 이름을 만들지 않았다.
-현재 수식과 타이머에는 확정된 정식 수치를 그대로 적용했다. 공통 구현 통합 때 해당 상수의 실제 이름에 맞춰
-참조를 연결하고 같은 기준 커밋에서 재검증해야 한다. CLI 인자 이름과 ms 단위는 기존 계약 그대로다.
+## 테스트
 
-## 독립 검증 결과
-
-2026-10-15 로컬 Windows, Python 3.12.14에서 **27개 테스트 통과** (27.727초). 테스트 명령:
+`HW3` 폴더에서 아래 명령으로 Worker 테스트를 실행한다.
 
 ```bash
 python -m unittest discover -s tests/worker -v
 ```
 
-`tests/worker/contract_double.py`는 확정된 API와 문법의 **테스트 전용 대역**이다.
-테스트가 명시적으로 설치하며 제품 코드에서는 사용하지 않는다.
-프로세스 테스트의 `run_with_contract_double.py`도 제출 실행 명령으로 사용하면 안 된다.
+테스트는 실제 공통 모듈을 사용한다. 프로세스 테스트는 `python -m hw3.worker`로 실행한다.
 
 검증 범위:
 
@@ -107,16 +95,10 @@ python -m unittest discover -s tests/worker -v
 
 10개 프로세스의 전체 계산 검사는 개발용 `step-delay=0`이다. 다른 TCP 검사는 10–300ms 지연을 사용한다.
 테스트는 임시 디렉터리와 독점적인 로컬 포트, 직접 생성한 프로세스 핸들만 사용하고 모두 정리한다.
-연구실 서버나 GPU는 사용하지 않았다.
 
-**실제 공통 모듈·Coordinator·Launcher와의 통합은 미완료**다. 기준 main에는 이 소스들이 없었다.
-대역 검증은 원격 AWS 실행, 실제 FD 인계 판정, 정식 100ms 무작위 장애 실행,
-최종 로그 12개 분석과 제출 영상의 증거가 아니다. 관련 소스 통합 후 단계별 실제 연결 검사를 수행해야 한다.
+## 로그
 
-## 로그 취합 안내
-
-Worker 이벤트 정의는 같은 폴더의 `AllDefinedLogs.txt`에 기록했다.
-최종 공통 `AllDefinedLogs.txt`에 안선효 담당이 취합할 수 있는 Worker 부분이다.
+전체 이벤트 정의는 [AllDefinedLogs.txt](../../AllDefinedLogs.txt), 실행 방법은 [Readme.txt](../../Readme.txt)에 정리한다.
 TAKEOVER 로그는 실제 계산 재개 시점에 기록하며 ckpt_epoch·resume_step·초기 partial을 포함한다.
 NodeLogger가 KST 형식, run_id, ts_unix_ms 및 한 줄의 직렬화를 담당한다.
 

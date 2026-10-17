@@ -1,4 +1,4 @@
-"""Chaos Launcher의 재현 가능한 상태와 타이머 규칙을 관리한다."""
+# Worker 장애 상태와 CRASH·RESTART 시각을 관리한다.
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ class WorkerStatus(Enum):
     EXITED = "EXITED"
 
 
-@dataclass(slots=True)
+@dataclass
 class WorkerSlot:
     worker_id: int
     process: Any = None
@@ -37,7 +37,7 @@ class WorkerSlot:
     ready: bool = False
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class CrashPlan:
     worker_id: int
     crash_count: int
@@ -48,7 +48,6 @@ class CrashPlan:
 
 
 class ChaosController:
-    """소켓 입출력은 이벤트 루프에 맡기고 Launcher 상태를 관리한다."""
 
     def __init__(
         self,
@@ -99,7 +98,6 @@ class ChaosController:
             self.blocked = True
             return None
 
-        # 난수 호출 순서도 과제의 재현성 규약에 포함된다.
         worker_id = self.rng.choice(candidates)
         downtime = self.rng.uniform(*DOWNTIME_SECONDS)
         slot = self.workers[worker_id]

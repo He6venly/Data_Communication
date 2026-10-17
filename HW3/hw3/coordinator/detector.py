@@ -1,4 +1,4 @@
-"""The single failure detector starts only after START has been sent."""
+# Heartbeat를 확인하여 Worker 장애를 판정한다.
 
 from hw3.common.settings import FAILURE_DETECTOR_INTERVAL_SECONDS
 

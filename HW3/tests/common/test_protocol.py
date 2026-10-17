@@ -1,3 +1,5 @@
+# 메시지 생성·해석과 입력값 검사를 테스트한다.
+
 import unittest
 
 from hw3.common.protocol import Message, ProtocolError, encode, parse

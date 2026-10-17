@@ -1,4 +1,4 @@
-"""Worker-owned state. Nested locks always follow Queue -> state -> Store."""
+# Worker 상태·작업 Queue·Checkpoint Store를 관리한다.
 
 from collections import deque
 from contextlib import contextmanager
@@ -39,7 +39,7 @@ class WorkerState:
         self.queue: deque[Assignment] = deque()
         self.store: dict[int, Checkpoint] = {}
         self.latest: dict[int, int] = {}
-        self.sent_epochs: dict[int, set[int]] = {}  # Diagnostic only; ACK never gates computation.
+        self.sent_epochs: dict[int, set[int]] = {}
         self.mode = "BOOTING"
         self.crash_gen = 0
         self.crash_count = 0
@@ -59,7 +59,6 @@ class WorkerState:
             yield
 
     def active(self, generation: int, assignment: Assignment | None = None) -> bool:
-        """Caller holds all state locks."""
         return (self.mode == "RUNNING" and self.crash_gen == generation
                 and (assignment is None or self.latest.get(assignment.task) == assignment.epoch))
 
@@ -74,8 +73,6 @@ class WorkerState:
 
     def enqueue(self, assignment: Assignment, generation: int | None = None) -> bool:
         with self.locked():
-            # Coordinator can make us ALIVE and send TAKEOVER before WELCOME arrives.
-            # Retain the assignment now; take_work still requires RUNNING.
             accepting = (self.mode == "RUNNING"
                          or (self.mode == "REJOINING" and assignment.from_worker is not None))
             if not accepting or (generation is not None and generation != self.crash_gen):
@@ -91,7 +88,6 @@ class WorkerState:
             return True
 
     def needs_request(self) -> bool:
-        """Caller holds all state locks."""
         return (self.mode == "RUNNING" and self.current is None and not self.queue
                 and not self.requested and not self.no_task)
 
@@ -114,7 +110,6 @@ class WorkerState:
                     if self.mode == "RUNNING" and self.queue:
                         assignment = self.queue.popleft()
                         ckpt = self.store.get(assignment.task) if assignment.from_worker is not None else None
-                        # A checkpoint from the previous owner has an older epoch.
                         if ckpt is not None and ckpt.epoch >= assignment.epoch:
                             ckpt = None
                         work = Work(assignment, self.crash_gen,
@@ -157,7 +152,6 @@ class WorkerState:
             return False
 
     def crash(self) -> dict | None:
-        """Caller also holds the network send gate, outside these locks."""
         with self.locked():
             if self.mode != "RUNNING":
                 return None

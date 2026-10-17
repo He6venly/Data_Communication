@@ -1,4 +1,4 @@
-"""TCP runtime using only the published common API, never other programs."""
+# Coordinator·Buddy·Launcher와 TCP로 통신한다.
 
 from dataclasses import dataclass, field
 import selectors
@@ -38,7 +38,6 @@ class Worker:
         self.config = config
         self.logger = logger
         self.state = WorkerState()
-        # Distinct from each socket's common send_line lock.
         self.send_gate = threading.Lock()
         self.coordinator: Channel | None = None
         self.launcher: Channel | None = None
@@ -103,7 +102,7 @@ class Worker:
                     due = self.state.rejoin_due
                     if self.state.mode != "REJOINING" or due is None or time.monotonic() < due:
                         return False
-                    self.state.rejoin_due = None  # RETRY_LATER explicitly schedules the next attempt.
+                    self.state.rejoin_due = None
                     rejoin_count = self.state.rejoin_count + 1
                 self._write(self.coordinator, "REJOIN", (self.config.worker_id,))
             self.emit("REJOIN", rejoin_count=rejoin_count)
@@ -140,7 +139,6 @@ class Worker:
                       step=step, partial=partial, direction="send", buddy=self.config.worker_id % 10 + 1)
             return True
         except (OSError, ValueError) as error:
-            # Peer failures do not establish DEAD and never abort prime computation.
             with self.send_gate:
                 if self.buddy is not None:
                     self.buddy.sock.close()
@@ -188,7 +186,6 @@ class Worker:
             if self.state.retry_later():
                 self.emit("RETRY_LATER")
         elif kind == "ACK" and mode == "RUNNING":
-            # ACK has no epoch; it must never clear a newer assignment.
             self.emit("ACK", task=int(fields[0]))
         elif kind == "REJECT_STALE" and mode == "RUNNING":
             task = int(fields[0])
@@ -197,7 +194,6 @@ class Worker:
                     if self.state.mode != "RUNNING":
                         return
                     epochs = self.state.sent_epochs.get(task, set())
-                    # The wire reply has no epoch. A late pre-CRASH reply is ambiguous.
                     epoch = next(iter(epochs)) if len(epochs) == 1 and self.state.crash_gen == 0 else None
             self.emit("REJECT_STALE", "WARN", task=task, epoch=epoch, reason=fields[1])
 
@@ -294,7 +290,6 @@ class Worker:
                 with self.send_gate:
                     if self.buddy is channel:
                         self.buddy = None
-                        # The Coordinator failed after the Peer handshake.
                         self.fail(error)
             self.emit("CONNECT", "WARN", role="buddy", error=str(error))
 
@@ -345,7 +340,6 @@ class Worker:
 
     def start(self):
         self.listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        # Do not enable SO_REUSEADDR: another Worker's occupied port must fail.
         self.listener.bind((self.config.peer_ip, self.config.peer_port))
         self.listener.listen(16)
         self.listener.settimeout(1.0)
@@ -373,7 +367,6 @@ class Worker:
 
     def close(self):
         self.stop()
-        # Closing the receiving sockets wakes the finite recv/select waits.
         for channel in (self.coordinator, self.buddy, self.launcher):
             if channel is not None:
                 try:

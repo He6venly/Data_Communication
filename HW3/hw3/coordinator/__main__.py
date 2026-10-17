@@ -1,4 +1,4 @@
-"""python -m hw3.coordinator --host 0.0.0.0 --port 4575 ..."""
+# Coordinator를 실행하고 종료한다.
 
 import argparse
 from datetime import datetime, timedelta, timezone
@@ -15,7 +15,6 @@ def worker_list(values):
 
 
 def console_message(event):
-    """Compact presentation of actual decisions; complete JSON stays in files."""
     f, kind = event.fields, event.kind
     if kind == "POOL":
         return (f"DONE={f['done']}/1000 | PENDING={f['pending']} | ASSIGNED={f['assigned']} | QUEUE={f['queue']}\n"
@@ -145,8 +144,6 @@ class Coordinator:
             self.fail(ConnectionError(f"{kind}: missing Worker channel"))
             return False
         try:
-            # RLock allows the common helper to take the same socket lock again.
-            # This also keeps a delayed dispatcher reply from following BYE.
             with channel.send_lock:
                 if self.finishing.is_set() and kind != "BYE":
                     return False
@@ -260,7 +257,7 @@ def arguments(argv=None):
     parser.add_argument("--port", type=int, default=COORDINATOR_PORT)
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--log-dir", type=Path, required=True)
-    parser.add_argument("--quiet", action="store_true", help="write complete logs without console summaries")
+    parser.add_argument("--quiet", action="store_true", help="파일 로그만 기록")
     args = parser.parse_args(argv)
     if not 1 <= args.port <= 65535 or not args.run_id:
         parser.error("invalid port or empty run id")
@@ -271,14 +268,8 @@ def main(argv=None):
     if sys.version_info < (3, 12):
         print("Python 3.12 이상이 필요합니다.", file=sys.stderr)
         return 2
-    try:
-        from hw3.common.log import NodeLogger
-        args = arguments(argv)
-    except ModuleNotFoundError as error:
-        if error.name and error.name.startswith("hw3.common"):
-            print("확정된 hw3.common 구현을 먼저 통합하세요.", file=sys.stderr)
-            return 2
-        raise
+    from hw3.common.log import NodeLogger
+    args = arguments(argv)
     logger = NodeLogger("COORD", args.log_dir / "Coordinator.txt", args.run_id)
     return 0 if Coordinator(args.host, args.port, logger, console=not args.quiet).run() else 1
 

@@ -1,3 +1,5 @@
+# Worker 실행 명령과 프로세스 관리를 테스트한다.
+
 import sys
 import unittest
 

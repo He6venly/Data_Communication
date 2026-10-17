@@ -1,4 +1,4 @@
-"""Heartbeat and REJOIN timers; neither timer advances while CRASHED."""
+# Heartbeat 전송과 REJOIN 재시도를 처리한다.
 
 import time
 
@@ -23,10 +23,7 @@ def heartbeat_loop(worker):
                     if hb_due or request_due or rejoin_due:
                         break
                     deadline = next_hb if state.mode == "RUNNING" else state.rejoin_due
-                    # BOOTING/CRASHED and REJOINING awaiting a reply have no timer.
                     timeout = max(0.0, deadline - now) if deadline is not None else None
-                # Check the predicate and enter wait under the same Queue/CV lock,
-                # so START/RESTART/WELCOME/finish/BYE notifications cannot be lost.
                 state.cv.wait(timeout)
         if hb_due:
             if worker.send_normal("HB", (worker.config.worker_id,), generation):

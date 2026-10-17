@@ -1,4 +1,4 @@
-"""HW3 공통 텍스트·JSON 형식을 기록하는 스레드 안전 KST 로거."""
+# 노드별 KST 로그를 기록한다.
 
 from __future__ import annotations
 
@@ -15,7 +15,6 @@ _STATUSES = {"SUCCESS", "FAIL", "INFO", "WARN"}
 
 
 class NodeLogger:
-    """각 노드가 소유한 파일 하나에 완전한 로그 레코드를 기록한다."""
 
     def __init__(self, node: str, path: str | Path, run_id: str) -> None:
         _validate_label(node, "node")

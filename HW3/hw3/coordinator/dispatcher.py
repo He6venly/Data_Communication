@@ -1,5 +1,4 @@
-"""Six fixed consumers; no I/O while Worker or Task locks are held."""
-
+# Dispatcher 6개가 대기 요청을 처리한다.
 
 STOP = object()
 
@@ -19,8 +18,6 @@ def dispatcher_loop(app):
         worker_id = app.sender(channel, message)
         if worker_id is None:
             continue
-        # Socket ordering lock, never a Worker/Task state lock during send.
-        # A queued REQ cannot send ASSIGN ahead of the same socket's WELCOME.
         with channel.send_lock:
             reply = None
             if kind == "RING_OK":

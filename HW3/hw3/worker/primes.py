@@ -1,19 +1,23 @@
-"""Inclusive segmented sieve for the fixed HW3 task/step ranges."""
+# 구간 체로 Task·step 범위의 소수 개수를 계산한다.
 
-from functools import lru_cache
 from math import isqrt
 
 
-@lru_cache(maxsize=1)
-def small_primes() -> tuple[int, ...]:
-    """Primes through sqrt(100,000,000), shared read-only within this process."""
-    flags = bytearray(b"\x01") * 10_001
-    flags[:2] = b"\x00\x00"
+def _build_small_primes() -> tuple[int, ...]:
+    flags = [True] * 10_001
+    flags[0] = flags[1] = False
     for p in range(2, isqrt(10_000) + 1):
         if flags[p]:
-            start = p * p
-            flags[start::p] = b"\x00" * ((10_000 - start) // p + 1)
+            for multiple in range(p * p, 10_001, p):
+                flags[multiple] = False
     return tuple(i for i, prime in enumerate(flags) if prime)
+
+
+_SMALL_PRIMES = _build_small_primes()
+
+
+def small_primes() -> tuple[int, ...]:
+    return _SMALL_PRIMES
 
 
 def step_bounds(task: int, step: int) -> tuple[int, int]:
@@ -25,13 +29,13 @@ def step_bounds(task: int, step: int) -> tuple[int, int]:
 
 def count_step(task: int, step: int) -> int:
     lo, hi = step_bounds(task, step)
-    flags = bytearray(b"\x01") * (hi - lo + 1)
+    flags = [True] * (hi - lo + 1)
     if lo == 1:
-        flags[0] = 0
+        flags[0] = False
     for p in small_primes():
         if p * p > hi:
             break
         start = max(p * p, ((lo + p - 1) // p) * p)
-        if start <= hi:
-            flags[start - lo::p] = b"\x00" * ((hi - start) // p + 1)
+        for multiple in range(start, hi + 1, p):
+            flags[multiple - lo] = False
     return sum(flags)

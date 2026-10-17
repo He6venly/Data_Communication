@@ -1,4 +1,4 @@
-"""UTF-8 줄 버퍼링과 순차적인 소켓 송신을 제공한다."""
+# UTF-8 줄 단위 수신과 소켓 송신을 처리한다.
 
 from __future__ import annotations
 
@@ -7,7 +7,6 @@ from typing import Any
 
 
 class LineBuffer:
-    """UTF-8 바이트를 이어서 해석하고 LF로 끝난 완전한 줄을 반환한다."""
 
     def __init__(self) -> None:
         self._decoder = codecs.getincrementaldecoder("utf-8")(errors="strict")
@@ -23,7 +22,6 @@ class LineBuffer:
 
 
 def send_line(sock: Any, line: str, send_lock: Any) -> None:
-    """해당 소켓의 잠금을 획득한 상태에서 UTF-8 한 줄을 전송한다."""
 
     if not isinstance(line, str):
         raise TypeError("line must be a string")
