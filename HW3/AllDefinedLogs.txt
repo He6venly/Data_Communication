@@ -1,92 +1,97 @@
-HW3 log contract
-Envelope: [HH:MM:SS.mmm] NODE | EVENT | STATUS | JSON
-KST; status=INFO/WARN/SUCCESS/FAIL. Every JSON record contains run_id, ts_unix_ms.
-Files: Coordinator.txt, Worker1.txt through Worker10.txt, Launcher.txt.
-Use a new run_id and log directory for each execution. No fabricated sample rows.
+HW3 로그 메시지 명세
+
+형식: [HH:MM:SS.mmm] NODE | EVENT | STATUS | JSON
+시각은 KST이며 STATUS는 INFO, WARN, SUCCESS, FAIL을 사용함.
+모든 JSON에 run_id와 ts_unix_ms를 기록함.
+파일: Coordinator.txt, Worker1.txt~Worker10.txt, Launcher.txt.
+실행마다 새 run_id와 로그 폴더를 사용함.
 
 Coordinator (NODE=COORD)
-Every record adds seq (decision order) and elapsed_ms (monotonic time since START;
-null before START). File writes happen outside business locks, so read by seq.
-INIT INFO: host, port, workers, dispatchers, task_locks, contract_version.
-CONNECT INFO: role, address. TCP accept only, not HELLO registration.
-HELLO INFO: worker, ip, port, registered. First accepted registration.
-RING INFO: workers. Fixed Buddy addresses sent after ten HELLO messages.
-RING_OK INFO: worker, ring_ready. Duplicate confirmations do not increase the count.
-START SUCCESS: ring_ready. Initial HB reference established, START broadcast begins.
-HB INFO: worker. Listener accepted a registered ALIVE/SUSPECT Worker's HB.
-ALIVE INFO: worker, reason=HB. SUSPECT recovery only; DEAD HB is ignored.
-REQ WARN: worker, reason. Request ignored when DEAD or not running.
-ASSIGN INFO: task, epoch=1, worker, rejoin_count. Owner was recorded before send.
-NO_TASK INFO: worker, pending=0, rejoin_count. No unassigned Task at request handling.
-RESULT INFO: task, epoch, worker, result. Received value, not proof of Commit.
-COMMIT SUCCESS: task, epoch, worker, result, commit_count, rejoin_count.
-  Task lock accepted the current epoch/owner exactly once.
-REJECT_STALE WARN: task, epoch, worker, result, reason=DEAD/DONE/EPOCH.
-SUSPECT INFO: worker, last_hb_elapsed_ms, detection_delay_ms. No ownership change.
+모든 행에 seq와 elapsed_ms를 기록함. seq는 판정 순서이며,
+elapsed_ms는 START 이후 경과 시간(ms)임. START 전에는 null임.
+
+INIT INFO: host, port, workers, dispatchers, task_locks, contract_version. 실행 구성.
+CONNECT INFO: role, address. TCP 연결 수락.
+HELLO INFO: worker, ip, port, registered. Worker 등록.
+RING INFO: workers. Buddy 주소 전송.
+RING_OK INFO: worker, ring_ready. Buddy 연결 완료 확인.
+START SUCCESS: ring_ready. 계산 시작 및 lastHB 초기화.
+HB INFO: worker. Heartbeat 수신.
+ALIVE INFO: worker, reason. SUSPECT Worker의 HB 회복.
+REQ WARN: worker, reason. 배정할 수 없는 상태의 요청.
+ASSIGN INFO: task, epoch, worker, rejoin_count. 새 Task 배정.
+NO_TASK INFO: worker, pending, rejoin_count. PENDING Task 없음.
+RESULT INFO: task, epoch, worker, result. 결과 수신.
+COMMIT SUCCESS: task, epoch, worker, result, commit_count, rejoin_count. 유효한 결과 반영.
+REJECT_STALE WARN: task, epoch, worker, result, reason. DEAD·DONE·EPOCH 사유로 결과 거부.
+SUSPECT INFO: worker, last_hb_elapsed_ms, detection_delay_ms. HB 부재 3초 이상.
 DEAD INFO: worker, crash_count, last_hb_elapsed_ms, detection_delay_ms,
-  owned_tasks, to_worker, dead_now. Newly DEAD workers are all marked first.
-TAKEOVER SUCCESS: task, old_epoch, epoch, from_worker, to_worker.
-  Ownership/epoch changed; send is not proof the receiver queued or resumed it.
-DEAD_SCAN INFO: worker, crash_count, owned_tasks. End of that DEAD ownership scan.
-  Every unfinished owned Task has moved. An in-flight RESULT may Commit before
-  its Task is scanned; it is then DONE and correctly excluded from owned_tasks.
-RETRY_LATER INFO: worker. REJOIN not approved; wire response asks retry in two seconds.
-REJOIN SUCCESS: worker, rejoin_count, pending. Worker Table approved this rejoin.
-WELCOME INFO: worker, rejoin_count. Approval prepared before wire send.
-PROTOCOL WARN: message, optional worker/message_kind/error. Invalid/unregistered input.
+  owned_tasks, to_worker, dead_now. HB 부재 5초 이상 및 인계 대상 결정.
+TAKEOVER SUCCESS: task, old_epoch, epoch, from_worker, to_worker. Task 소유권·epoch 변경.
+DEAD_SCAN INFO: worker, crash_count, owned_tasks. 해당 Worker의 소유 Task 순회 완료.
+  순회 전에 Commit된 Task는 인계 대상에서 제외함.
+RETRY_LATER INFO: worker. 재합류 요청을 2초 뒤 다시 보내도록 응답.
+REJOIN SUCCESS: worker, rejoin_count, pending. 재합류 승인 및 ALIVE 전환.
+WELCOME INFO: worker, rejoin_count. 재합류 승인 응답 생성.
+PROTOCOL WARN: worker, message, message_kind, error 중 해당 필드. 잘못된 메시지·송신자.
 POOL INFO: queue, pending, assigned, done, alive, alive_workers, suspect_workers,
-  dead_workers, commits, double_commit, sum,
-  all_commit_once, min_commit_count, max_commit_count. Periodic snapshot.
-  alive is the count; *_workers are ordered Worker-ID lists read under one lock.
-VERIFY SUCCESS/FAIL: final Task snapshot above plus pass. Not remote-deployment proof.
-SUMMARY INFO: execution_ms, throughput, faults[], rejoins[]. Fault recovery tracks
-  final Commit even after another takeover; no owned tasks gives null recovery.
-BYE INFO: worker. Shutdown command sent successfully; not proof of process exit.
-ERROR FAIL: error. Abort including registered TCP EOF outside final shutdown.
-TERMINATE SUCCESS/FAIL: error, threads_alive. All Coordinator threads joined.
+  dead_workers, commits, double_commit, sum, all_commit_once, min_commit_count,
+  max_commit_count. 5초마다 진행 상태 기록.
+VERIFY SUCCESS/FAIL: pending, assigned, done, alive, alive_workers, suspect_workers,
+  dead_workers, commits, double_commit, sum, all_commit_once, min_commit_count,
+  max_commit_count, pass. 최종 Task 수·합계·중복 반영 검사.
+SUMMARY INFO: execution_ms, throughput, faults, rejoins. 실행·장애별 지표.
+  faults: worker, crash_count, to_worker, owned_tasks, last_hb_elapsed_ms,
+    dead_elapsed_ms, detection_ms, recovery_ms.
+  rejoins: worker, rejoin_count, first_task, commits, latency_ms.
+  인계 Task가 없으면 recovery_ms는 null이며 재인계된 Task는 최종 Commit까지 계산함.
+BYE INFO: worker. 종료 명령 전송.
+ERROR FAIL: error. 실행 오류.
+TERMINATE SUCCESS/FAIL: error, threads_alive. Coordinator 스레드 종료.
 
 Worker (NODE=Worker{i})
-Worker adds worker=i. Event definitions correspond to the Worker implementation.
-INIT INFO: node, pid, coordinator, peer_ip, peer_port, step_delay_ms, contract_version.
-CONNECT INFO/WARN: role, applicable host/ip/port/peer/buddy or error.
-RING INFO: buddy, ip, port. Address received, not connection proof.
-START INFO: ring_ready, started_at_unix_ms. RUNNING entered.
-READY INFO: READY i sent once after START and Launcher identification.
-REQ INFO: Request sent while idle, not requested, and no_task=False.
-ASSIGN INFO: task, epoch. Added to local Queue.
-TAKEOVER INFO: task, epoch, from_worker, ckpt_epoch, resume_step, partial.
-  Actual computation starts/resumes; missing CKPT gives null, 1, 0.
-CKPT INFO/WARN: task, epoch, step, partial, direction=send/receive, optional buddy/error.
-  Send return does not prove Buddy storage. Receive means Store updated.
-HB INFO: HB sent while RUNNING.
-RESULT SUCCESS: task, epoch, result. Sent value, not Coordinator Commit.
-ACK INFO: task. Does not gate the next REQ.
-REJECT_STALE WARN: task, epoch, reason. Ambiguous epoch is null; no state mutation.
-NO_TASK INFO: Requested resolved; remains set until CRASH, including after TAKEOVER.
+모든 행에 worker를 기록함.
+
+INIT INFO: node, pid, coordinator, peer_ip, peer_port, step_delay_ms, contract_version. 실행 구성.
+CONNECT INFO/WARN: role와 해당 연결의 host, ip, port, peer, buddy 또는 error. 연결 상태.
+RING INFO: buddy, ip, port. 고정 Buddy 주소 수신.
+START INFO: ring_ready, started_at_unix_ms. START 수신 및 RUNNING 전환.
+READY INFO: START 수신과 Launcher 연결 완료 후 READY 전송.
+REQ INFO: 현재 Task·Queue가 비어 있을 때 새 Task 요청.
+ASSIGN INFO: task, epoch. 배정받은 Task를 Queue에 저장.
+TAKEOVER INFO: task, epoch, from_worker, ckpt_epoch, resume_step, partial. 인계 Task 계산 시작.
+  CKPT가 없으면 ckpt_epoch=null, resume_step=1, partial=0임.
+CKPT INFO/WARN: task, epoch, step, partial, direction과 해당 buddy 또는 error.
+  direction=send는 송신, receive는 Store 갱신을 의미함.
+HB INFO: RUNNING 상태의 Heartbeat 송신.
+RESULT SUCCESS: task, epoch, result. Task 결과 송신.
+ACK INFO: task. 결과 반영 응답 수신.
+REJECT_STALE WARN: task, epoch, reason. 결과 거부 응답 수신. epoch가 불명확하면 null임.
+NO_TASK INFO: 배정할 Task가 없음. no_task는 CRASH 전까지 유지함.
 CRASH INFO: crash_count, crash_gen, queue_cleared, store_cleared, current_task.
-  Memory invalidated, existing TCP retained, normal sending stopped.
-RESTART INFO: CRASHED to REJOINING; computation and HB still wait.
-REJOIN INFO: rejoin_count. Sent request, not approval proof.
-RETRY_LATER INFO: Retry after two seconds only if still REJOINING.
-WELCOME INFO: rejoin_count. Approval received, RUNNING entered.
-REJOINED INFO: rejoin_count. Launcher notified after WELCOME.
-PROTOCOL WARN: role, error. Invalid Coordinator line.
-ERROR FAIL: error. Fatal runtime/control connection failure.
-BYE INFO: Shutdown received even while CRASHED.
-TERMINATE SUCCESS/FAIL: error, threads_alive. Worker threads joined.
+  메모리 초기화와 송신 중단을 수행하며 TCP 연결은 유지함.
+RESTART INFO: CRASHED에서 REJOINING으로 전환.
+REJOIN INFO: rejoin_count. 재합류 요청 전송.
+RETRY_LATER INFO: REJOINING이면 2초 뒤 재합류 요청 재시도.
+WELCOME INFO: rejoin_count. 승인 수신 및 RUNNING 전환.
+REJOINED INFO: rejoin_count. Launcher에 재합류 완료 통보.
+PROTOCOL WARN: role, error. 잘못된 Coordinator 메시지.
+ERROR FAIL: error. 실행·제어 연결 오류.
+BYE INFO: 종료 명령 수신. CRASHED 상태에서도 처리함.
+TERMINATE SUCCESS/FAIL: error, threads_alive. Worker 스레드 종료.
 
 Launcher (NODE=LAUNCHER)
-INIT INFO: contract_version, seed, workers, coord, peer_ip, peer_base, step_delay_ms.
-PROCESS_START SUCCESS: worker, pid, peer_port. Created an independent process.
-CONNECT SUCCESS: worker, peer_ip, peer_port. Sent LAUNCHER identification.
-READY SUCCESS: worker, ready_count; tenth unique READY adds t0_monotonic,
-  first_crash_in_ms. This starts the random schedule.
-CRASH INFO: worker, crash_count, candidates, down, downtime_ms. CRASH sent.
-RESTART INFO: worker, crash_count, down. RESTART sent, still counted as down.
-REJOINED SUCCESS: worker, crash_count, down. Worker confirmed rejoin.
-EOF INFO: worker, state=EXITED, down. Control EOF, scheduled restart cancelled.
-INJECTION_END INFO: elapsed_ms. New CRASH stopped; pending recovery continues.
-SEND FAIL: worker, command, error. Failed control send, handled as EOF.
-PROTOCOL WARN: worker, optional line/message/reason/error. Invalid control input.
-TERMINATE SUCCESS: exited_workers. All ten control connections reached EXITED.
-TERMINATE FAIL: error_type, error. Launcher failure and owned-process cleanup.
+INIT INFO: contract_version, seed, workers, coord, peer_ip, peer_base, step_delay_ms. 실행 구성.
+PROCESS_START SUCCESS: worker, pid, peer_port. 독립 Worker 프로세스 실행.
+CONNECT SUCCESS: worker, peer_ip, peer_port. 제어 연결 및 LAUNCHER 전송.
+READY SUCCESS: worker, ready_count. Worker 준비 완료.
+  10개가 준비되면 t0_monotonic, first_crash_in_ms를 추가하고 장애 주입을 시작함.
+CRASH INFO: worker, crash_count, candidates, down, downtime_ms. 무작위 장애 주입.
+RESTART INFO: worker, crash_count, down. 재시작 명령 전송.
+REJOINED SUCCESS: worker, crash_count, down. 재합류 완료 확인.
+EOF INFO: worker, state, down. 제어 연결 종료 및 예정 RESTART 취소.
+INJECTION_END INFO: elapsed_ms. 새 CRASH 주입 종료. 예약된 RESTART는 계속 처리함.
+SEND FAIL: worker, command, error. 제어 명령 송신 오류.
+PROTOCOL WARN: worker와 해당 line, message, reason 또는 error. 잘못된 제어 메시지.
+TERMINATE SUCCESS: exited_workers. Worker 10개의 프로세스가 종료 코드 0으로 종료함.
+TERMINATE FAIL: error_type, error. 실행 실패 및 생성한 프로세스 정리.

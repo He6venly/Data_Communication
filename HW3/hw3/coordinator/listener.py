@@ -1,4 +1,4 @@
-"""One selector thread owns accepts, recv buffers and direct HB handling."""
+# Worker 연결과 메시지 수신을 처리한다.
 
 from dataclasses import dataclass, field
 import selectors

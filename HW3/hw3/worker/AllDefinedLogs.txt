@@ -1,32 +1,35 @@
-HW3 Worker events (for team lead to combine into final AllDefinedLogs.txt)
-Common envelope: [HH:MM:SS.mmm] Worker{i} | EVENT | STATUS | JSON
-NodeLogger supplies KST time, run_id, ts_unix_ms. Worker adds worker=i.
+HW3 Worker 로그 메시지 명세
 
-INIT INFO: node, pid, coordinator, peer_ip, peer_port, step_delay_ms, contract_version.
-CONNECT INFO/WARN: role=coordinator/buddy/peer/launcher, applicable host/ip/port/peer/buddy or error.
-RING INFO: buddy, ip, port. Fixed Buddy metadata received, not proof of connection.
-START INFO: ring_ready, started_at_unix_ms. START received and RUNNING entered.
-READY INFO: READY i sent after both START and Launcher identification. Exactly once.
-REQ INFO: REQ i sent while idle, not requested, and no_task=False.
-ASSIGN INFO: task, epoch. Assignment admitted into the local Queue.
-TAKEOVER INFO: task, epoch, from_worker, ckpt_epoch, resume_step, partial.
-  Actual Compute start/resume, not mere Queue admission. Missing CKPT: null, 1, 0.
-CKPT INFO/WARN: task, epoch, step, partial, direction=send/receive, optional buddy/error.
-  send INFO means send returned; not proof that Buddy stored it. receive means Store updated.
-HB INFO: HB i sent in RUNNING.
-RESULT SUCCESS: task, epoch, result. RESULT sent, not Coordinator Commit.
-ACK INFO: task. Coordinator ACK received; does not gate the next REQ.
-REJECT_STALE WARN: task, epoch, reason. Received reply does not modify pending/current work.
-  epoch is null if the reply cannot be unambiguously attributed from local sent-result evidence.
-NO_TASK INFO: request resolved; no_task remains True through later TAKEOVER until CRASH.
+형식: [HH:MM:SS.mmm] Worker{i} | EVENT | STATUS | JSON
+KST 시각과 run_id, ts_unix_ms를 기록함.
+전체 이벤트 정의는 HW3/AllDefinedLogs.txt에 정리함.
+
+모든 행에 worker를 기록함.
+
+INIT INFO: node, pid, coordinator, peer_ip, peer_port, step_delay_ms, contract_version. 실행 구성.
+CONNECT INFO/WARN: role와 해당 연결의 host, ip, port, peer, buddy 또는 error. 연결 상태.
+RING INFO: buddy, ip, port. 고정 Buddy 주소 수신.
+START INFO: ring_ready, started_at_unix_ms. START 수신 및 RUNNING 전환.
+READY INFO: START 수신과 Launcher 연결 완료 후 READY 전송.
+REQ INFO: 현재 Task·Queue가 비어 있을 때 새 Task 요청.
+ASSIGN INFO: task, epoch. 배정받은 Task를 Queue에 저장.
+TAKEOVER INFO: task, epoch, from_worker, ckpt_epoch, resume_step, partial. 인계 Task 계산 시작.
+  CKPT가 없으면 ckpt_epoch=null, resume_step=1, partial=0임.
+CKPT INFO/WARN: task, epoch, step, partial, direction과 해당 buddy 또는 error.
+  direction=send는 송신, receive는 Store 갱신을 의미함.
+HB INFO: RUNNING 상태의 Heartbeat 송신.
+RESULT SUCCESS: task, epoch, result. Task 결과 송신.
+ACK INFO: task. 결과 반영 응답 수신.
+REJECT_STALE WARN: task, epoch, reason. 결과 거부 응답 수신. epoch가 불명확하면 null임.
+NO_TASK INFO: 배정할 Task가 없음. no_task는 CRASH 전까지 유지함.
 CRASH INFO: crash_count, crash_gen, queue_cleared, store_cleared, current_task.
-  Transition complete, memory cleared, all existing TCP connections retained.
-RESTART INFO: CRASHED -> REJOINING. No HB or Compute yet.
-REJOIN INFO: rejoin_count. REJOIN i sent; not proof of Coordinator approval.
-RETRY_LATER INFO: received in REJOINING; schedules REJOIN after 2 seconds.
-WELCOME INFO: rejoin_count. Coordinator approval received, RUNNING entered.
-REJOINED INFO: rejoin_count. Launcher notified after WELCOME.
-PROTOCOL WARN: role, error. Invalid Coordinator line rejected.
-ERROR FAIL: error. Fatal runtime or required control connection failure, stopping.
-BYE INFO: Coordinator shutdown received, including in CRASHED.
-TERMINATE SUCCESS/FAIL: error (null on normal shutdown), threads_alive (must be 0).
+  메모리 초기화와 송신 중단을 수행하며 TCP 연결은 유지함.
+RESTART INFO: CRASHED에서 REJOINING으로 전환.
+REJOIN INFO: rejoin_count. 재합류 요청 전송.
+RETRY_LATER INFO: REJOINING이면 2초 뒤 재합류 요청 재시도.
+WELCOME INFO: rejoin_count. 승인 수신 및 RUNNING 전환.
+REJOINED INFO: rejoin_count. Launcher에 재합류 완료 통보.
+PROTOCOL WARN: role, error. 잘못된 Coordinator 메시지.
+ERROR FAIL: error. 실행·제어 연결 오류.
+BYE INFO: 종료 명령 수신. CRASHED 상태에서도 처리함.
+TERMINATE SUCCESS/FAIL: error, threads_alive. Worker 스레드 종료.

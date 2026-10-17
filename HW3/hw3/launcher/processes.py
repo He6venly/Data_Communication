@@ -1,4 +1,4 @@
-"""독립된 Worker 프로세스의 실행 명령을 만들고 시작한다."""
+# Worker 프로세스의 실행 명령과 기동·정리를 처리한다.
 
 from __future__ import annotations
 
@@ -20,7 +20,6 @@ def build_worker_command(
     run_id: str,
     log_dir: str | Path,
 ) -> list[str]:
-    """Worker 하나를 실행할 ``python -m hw3.worker`` 인자 목록을 반환한다."""
 
     if not 1 <= worker_id <= WORKER_COUNT:
         raise ValueError(f"worker_id must be 1..{WORKER_COUNT}")
@@ -54,7 +53,6 @@ def start_worker(
     command: Sequence[str],
     popen_factory: Callable[..., Any] | None = None,
 ) -> Any:
-    """셸과 미사용 출력 파이프 없이 Worker 하나를 시작한다."""
 
     factory = subprocess.Popen if popen_factory is None else popen_factory
     return factory(list(command), shell=False)
@@ -86,7 +84,6 @@ def start_workers(
 
 
 def stop_processes(processes: dict[int, Any], wait_seconds: float = 3.0) -> None:
-    """Launcher가 시작한 Worker 프로세스만 가능한 범위에서 정리한다."""
 
     running = [process for process in processes.values() if process.poll() is None]
     for process in running:

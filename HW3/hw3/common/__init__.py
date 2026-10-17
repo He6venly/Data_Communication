@@ -1,4 +1,4 @@
-"""공통 설정, 통신 규약, 송수신, 로그 기능을 제공한다."""
+# 공통 메시지 API를 공개한다.
 
 from .protocol import Message, ProtocolError, encode, parse
 

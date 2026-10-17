@@ -1,4 +1,4 @@
-"""One Compute thread; current task completes before FIFO takeover tasks."""
+# Task의 step을 계산하고 CKPT·RESULT를 전송한다.
 
 from .primes import count_step
 

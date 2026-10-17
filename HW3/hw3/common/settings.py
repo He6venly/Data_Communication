@@ -1,8 +1,4 @@
-"""HW3 공통 규약에서 정한 고정값을 모아 둔다.
-
-이 모듈에는 변경되지 않는 설정만 두며, 실행 중 상태는 각 값을 사용하는
-Coordinator, Worker, Launcher가 관리한다.
-"""
+# 포트·Worker 수·시간 설정을 정의한다.
 
 CONTRACT_VERSION = 1
 

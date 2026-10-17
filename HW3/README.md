@@ -1,9 +1,9 @@
 # HW3 - Fault-Tolerant 협업 Worker Ring
 
 2026학년도 2학기 데이터통신 2조. **Python으로 확정**, HW2 코드는 재사용하지 않고 새로 구현한다.
-현재 상태: 공통 모듈·Coordinator·Worker·Launcher·로그 분석기 통합 및 로컬 검증 완료. AWS 원격 정식 실행·영상·제출물 준비는 남아 있다. 제출 기한: **2026-10-26(월) 23:59**.
+프로그램 설명과 실행 방법은 [Readme.txt](Readme.txt), 로그 이벤트 정의는 [AllDefinedLogs.txt](AllDefinedLogs.txt)에 정리한다.
 
-사용자 확정: **안선효 : 황대겸 : 황왕석 = 4 : 3 : 3**을 목표로 배분하며 AWS Coordinator TCP 포트는 **4575**다. 공통 규약 4항목은 2026-10-14 안선효가 기존 안 유지로 확정했으며 황왕석이 구현한다.
+**안선효 : 황대겸 : 황왕석 = 4 : 3 : 3**으로 역할을 나누며 AWS Coordinator TCP 포트는 **4575**다.
 
 이 README에 구현 계획·역할 분담·확정된 공통 규약을 정리한다.
 
@@ -23,7 +23,7 @@
 
 ## 2. 3인 역할 배분
 
-기존 담당과 구조를 유지하고 로그 분석 도구만 황왕석에서 안선효로 이동한다. 4:3:3은 복잡도·통합 책임을 고려한 목표 비중이며 실측 시간 비율은 아니다.
+각 담당의 업무 비중은 4:3:3으로 나눈다. 로그 분석은 안선효가 맡는다.
 
 | 담당 | 목표 비중 | 주 담당 범위 | 소유 경로 |
 | --- | --- | --- | --- |
@@ -69,16 +69,18 @@
 - 담당 검증: 공통 송수신·로그 구현, 난수 호출 순서, 동시 장애 상한, 80초 이후 주입 중단, EOF·종료.
 - 반환물: 담당 소스·테스트, 실행 방법·추가 이벤트 설명, 검증 결과·남은 문제.
 
-## 3. 제안 패키지·파일 구성
+## 3. 패키지·파일 구성
 
-아래는 담당별 패키지 구조다. Coordinator·Worker·tools는 구현했고, 공통·Launcher는 별도 담당 PR에 있다. 각 패키지에는 `__init__.py`를 둔다.
+아래는 담당별 패키지 구조다. `common/__init__.py`는 공통 메시지 API를 공개한다.
 
 ```text
 HW3/
+├─ Readme.txt
+├─ AllDefinedLogs.txt
 ├─ README.md
 ├─ hw3/
-│  ├─ __init__.py
 │  ├─ common/                    # 황왕석: 업무 상태 없이 공통 규약만
+│  │  ├─ __init__.py             # 공통 메시지 API 공개
 │  │  ├─ settings.py             # 고정 수치·실행 설정의 불변 데이터
 │  │  ├─ protocol.py             # Message, encode/parse, 필드 검증
 │  │  ├─ transport.py            # LineBuffer, 송신 Lock·부분 쓰기 처리
@@ -107,7 +109,7 @@ HW3/
    ├─ worker/                    # 황대겸: 테스트와 자기 TCP 대역
    ├─ common/                    # 황왕석
    ├─ launcher/                  # 황왕석: 테스트와 자기 TCP 대역
-   └─ integration/               # 안선효 취합, 각 담당이 자기 오류 수정
+   └─ tools/                     # 안선효: 로그 분석기 테스트
 ```
 
 파일 수를 줄이려면 같은 담당의 파일만 합칠 수 있다. 각 실행 패키지의 `__main__.py`가 인자 처리·초기화·실행·종료를 담당한다. 필요하면 launcher의 `processes.py`도 `__main__.py`에 합칠 수 있지만 Worker 상태나 Coordinator 테이블을 공통 패키지로 합치지 않는다.
@@ -126,7 +128,7 @@ Coordinator↔Worker, Worker→Buddy, Launcher↔Worker는 TCP로만 연결한�
 
 ### 사용자 확정 공통 규약: 4개
 
-아래 4항목과 이에 대응하는 API·메시지·CLI·로그 상세는 **2026-10-14 사용자 선택으로 확정**됐다. `common/settings.py`, `common/protocol.py`, `common/transport.py`, `common/log.py`와 각 프로그램의 `__main__.py`가 따르는 계약이다.
+아래 4항목을 공통 규약으로 사용한다. `common/settings.py`, `common/protocol.py`, `common/transport.py`, `common/log.py`와 각 프로그램의 `__main__.py`가 따르는 계약이다.
 
 | 확정 항목 | 계약 |
 | --- | --- |
@@ -139,12 +141,12 @@ PDF의 필수 동작·수치와 담당 내부의 자료구조·스레드 배치�
 
 | 모듈 | 고정할 계약 | 경계 |
 | --- | --- | --- |
-| settings | 과제 상수 + 읽기 전용 실행 설정 | Task 크기·Worker 수·타임아웃을 한 곳에서 정의. 살아 있는 상태를 넣지 않음 |
+| settings | 과제 상수 | Task 크기·Worker 수·타임아웃을 한 곳에서 정의. 살아 있는 상태를 넣지 않음 |
 | protocol | `Message(kind: str, fields: tuple[str, ...])`, `encode(message) -> str`, `parse(line) -> Message` | encode는 LF 없는 문자열 반환. 문법·필드 범위 검사만 하며 생존·epoch 유효성 판단은 각 프로그램 담당. 잘못된 문법은 `ProtocolError` |
 | transport | `LineBuffer.feed(bytes) -> list[str]`, `send_line(socket, line, send_lock)` | feed는 미완성 줄을 보관. send_line은 LF 하나를 붙여 전체 바이트를 직렬화해 송신하며 업무 Lock을 받지 않음 |
 | log | `NodeLogger(node, path, run_id)`, `write(event, status, fields)`, `close()` | 자기 파일 하나만 관리. 다른 노드의 파일을 지우거나 통계 상태를 변경하지 않음 |
 
-공통 구현 전에는 각 담당이 내부 상태·계산과 테스트 대역을 개발한다. 공통 최소 구현은 먼저 하나의 기준으로 통합하고, 세 담당이 같은 커밋에서 시작한다. 공통 파일을 각자 복사해 수정하거나 담당별로 다른 버전을 사용하지 않는다. 테스트 대역은 `tests/`에만 두고 제품 실행에 연결하지 않는다.
+세 프로그램은 같은 공통 모듈을 사용한다. 공통 파일을 담당별로 복사해 수정하지 않는다. 테스트 대역은 `tests/`에서만 사용한다.
 
 공통 규약 변경이 필요하면 이유·영향 경로·수정할 호출을 보고하고 안선효가 결정한다. 각 담당 소유 파일은 해당 담당이 수정하며 안선효가 최종 통합을 확인한다.
 
@@ -152,7 +154,7 @@ PDF의 필수 동작·수치와 담당 내부의 자료구조·스레드 배치�
 
 | 통합 문제 | 예방 기준 |
 | --- | --- |
-| encode/parse의 인자·필드 해석이 서로 다름 | 공통 모듈을 한 번 구현·검증하고 같은 기준 커밋 사용. 메시지별 정상/오류 예제를 `tests/common/`에서 관리 |
+| encode/parse의 인자·필드 해석이 서로 다름 | 같은 공통 모듈 사용. 메시지별 정상/오류 예제를 `tests/common/`에서 관리 |
 | 각자의 fake 상대가 실제 상대와 다르게 동작 | 대역 테스트와 별도로 실제 Coordinator·Worker·Launcher를 초반부터 연결. 실제 상대와의 통과 기록이 있어야 기능 완료 |
 | ACK·ASSIGN·TAKEOVER 도착 순서를 다르게 가정 | 허용 순서를 공통 계약에 기록. ACK 뒤에만 ASSIGN이 온다고 가정하지 않으며, 계산 중 TAKEOVER·늦은 ACK·재합류 메시지 사례도 검사 |
 | CLI·경로·Python 환경이 맞지 않음 | 같은 `python -m` 진입점·인자·run_id·로그 위치 규약으로 실행. Launcher는 자기 인터프리터로 별도 Worker 프로세스를 실행 |
@@ -201,17 +203,17 @@ Worker의 다음 REQ는 RESULT 송신 후 진행 Task·대기 Queue가 모두 �
 
 ### 실행 명령
 
-명령은 `HW3` 폴더에서 실행한다. Coordinator와 분석기는 실제 공통 모듈·Worker·Launcher를 연결한 별도 폴더에서 로컬 실행을 검증했다. 원격 AWS 실행은 미검증이며 공통·Launcher 담당 PR을 먼저 통합해야 한다. IP·포트·seed는 인자로 전달한다. `run_id`는 양쪽에서 같은 값을 수동 지정해 동일 실행 로그를 묶는다.
+명령은 `HW3` 폴더에서 실행한다. Coordinator는 AWS, Worker 10개와 Launcher는 로컬 PC에서 실행한다. IP·포트·seed는 인자로 전달하고, 양쪽 `run_id`는 같은 값으로 지정한다. 실행마다 새 로그 폴더를 사용한다. OS별 명령은 [Readme.txt](Readme.txt)를 따른다.
 
 ```bash
 # 원격 호스트
 python -m hw3.coordinator --host 0.0.0.0 --port 4575 --run-id hw3-run01 --log-dir logs/hw3-run01
 
 # 로컬 PC: Launcher가 Worker 10개를 실행
-python -m hw3.launcher --coord <REMOTE_IP>:4575 --workers 10 --peer-ip 127.0.0.1 --peer-base 7000 --step-delay 100 --seed 42 --run-id hw3-run01 --log-dir logs/hw3-run01
+python -m hw3.launcher --coord AWS_PUBLIC_IP:4575 --workers 10 --peer-ip 127.0.0.1 --peer-base 7000 --step-delay 100 --seed 42 --run-id hw3-run01 --log-dir logs/hw3-run01
 
 # Launcher가 내부적으로 실행하는 Worker 명령 예
-python -m hw3.worker --id 1 --coord <REMOTE_IP>:4575 --peer-ip 127.0.0.1 --peer-port 7001 --step-delay 100 --run-id hw3-run01 --log-dir logs/hw3-run01
+python -m hw3.worker --id 1 --coord AWS_PUBLIC_IP:4575 --peer-ip 127.0.0.1 --peer-port 7001 --step-delay 100 --run-id hw3-run01 --log-dir logs/hw3-run01
 ```
 
 Launcher는 자신의 `sys.executable`을 사용하고 명령 인자를 리스트로 전달한다. Worker 경로·클래스를 import하지 않으므로 테스트에서는 자기 fake Worker 명령으로 교체해 독립 검증할 수 있다.
@@ -224,12 +226,12 @@ Launcher는 자신의 `sys.executable`을 사용하고 명령 인자를 리스�
 
 | EVENT | 최소 필드 |
 | --- | --- |
-| INIT / START | node·설정값·contract_version / 시작 시각·ring_ready |
+| INIT / START | 실행 설정·contract_version / ring_ready·시각 |
 | ASSIGN | task, epoch, worker |
 | CRASH / RESTART | worker, 해당 Worker의 장애 회차, down 목록 / worker |
 | SUSPECT / DEAD | worker, last_hb_elapsed_ms, elapsed_ms; DEAD는 owned_tasks, to_worker, dead_now |
 | TAKEOVER (Coordinator) | task, old_epoch, epoch, from_worker, to_worker |
-| TAKEOVER (Worker) | task, epoch, from_worker, ckpt_epoch, resume_step |
+| TAKEOVER (Worker) | task, epoch, from_worker, ckpt_epoch, resume_step, partial |
 | RESULT / COMMIT | task, epoch, worker, result; COMMIT은 commit_count |
 | REJOIN / WELCOME | worker, rejoin_count |
 | REJECT_STALE | task, epoch, worker, reason |
@@ -241,7 +243,7 @@ Coordinator의 elapsed_ms와 last_hb_elapsed_ms는 START 시각을 0으로 한 �
 
 검증 도구는 1,000 DONE·각 commit_count=1·합계 5,761,455·COMMIT 1,000개·CRASH/DEAD/승인 REJOIN 수 일치·동시 장애 최대 2개·재합류 후 새 Task를 검사한다. 복구 시간은 재인계까지 추적한 최종 Commit을 기준으로 하고, CKPT 절약률은 Worker의 resume_step에서 계산한다.
 
-### 구현 시 안내: 영상에서 요구 동작을 확인하기 쉬운 로그
+### 시연 영상의 로그 표시
 
 **구현 단계부터 영상 시연의 가독성을 고려해 로그를 설계한다.** 교수자가 화면에서 필수 기능과 상태 전이를 쉽게 찾고, 같은 Task의 장애·인계·재개·완료를 따라갈 수 있어야 한다. 기존 KST·텍스트+JSON 형식, 이벤트명·필드·파일명 12개는 유지한다.
 
@@ -261,14 +263,14 @@ Coordinator의 elapsed_ms와 last_hb_elapsed_ms는 START 시각을 0으로 한 �
 - 시연용 출력 때문에 업무 Lock 안에서 I/O하거나 Coordinator에 허용되지 않은 로그 스레드를 추가하지 않는다. 필수 기록은 없애지 않고, 출력이 HB·FD·복구를 방해하지 않도록 구현한다.
 - 정식 영상과 제출 로그는 동일 원격 실행에서 얻는다. 개발용 수동 이웃 장애 실행은 별도로 구분하고 정식 무작위 장애 실행의 증거로 섞지 않는다. REJECT_STALE 등 실제 발생한 추가 경로만 설명한다.
 
-각 담당은 자기 이벤트의 가독성을 구현하면서 확인하고, 안선효는 실제 실행 로그로 위 동작을 찾아볼 수 있는지 최종 취합한다. 실제 수행한 검증 범위와 결과는 9절에 구분해 기록한다.
+각 담당은 자기 이벤트의 가독성을 구현하면서 확인하고, 안선효는 실제 실행 로그로 위 동작을 찾아볼 수 있는지 최종 취합한다. 실행 결과는 `Readme.txt`에 기록한다.
 
 ## 7. 핵심 동기화·장애 경계
 
 - Coordinator Lock 순서: Worker Table→Task(오름차순). Task마다 독립 Lock을 만들고 상태 Lock 밖에서 send한다.
 - Worker Lock 순서: Queue→state→Store. 수신 처리의 상태/세대 확인과 Queue·Store 변경 사이에 CRASH가 끼어들지 않도록 보호한다.
 - Worker는 Task를 꺼낸 순간의 crash_gen을 기억한다. Compute·HB·REQ 등 정상 송신은 같은 세대이고 RUNNING일 때만 허용한다.
-- **송신 직전 확인만으로는 충분하지 않다.** Worker의 송신 전용 직렬화 경계를 CRASH 전환과 공유한다. 송신 경계 안에서 state/세대를 확인하고 state Lock을 푼 뒤 전송한다. CRASH는 같은 경계에서 진행 중 송신이 끝난 뒤 CRASHED 전환·초기화를 수행한다. 네트워크 I/O 동안 Queue·state·Store Lock은 보유하지 않는다. 송신 무한 대기는 유한 타임아웃으로 제한한다. 이 방법은 설계안이며 경쟁 테스트로 확인해야 한다.
+- **송신 직전 확인만으로는 충분하지 않다.** Worker의 송신 전용 직렬화 경계를 CRASH 전환과 공유한다. 송신 경계 안에서 state/세대를 확인하고 state Lock을 푼 뒤 전송한다. CRASH는 같은 경계에서 진행 중 송신이 끝난 뒤 CRASHED 전환·초기화를 수행한다. 네트워크 I/O 동안 Queue·state·Store Lock은 보유하지 않는다. 송신 무한 대기는 유한 타임아웃으로 제한한다.
 - 송신 경계는 Queue·state·Store Lock 밖에서 진입한다. CRASH 처리의 중첩 순서는 송신 경계→Queue→state→Store로 고정한다. 공통 send_line의 Socket 송신 Lock과 Worker의 상태 전환 경계는 별개로 두어 동일한 비재진입 Lock을 두 번 잡지 않는다.
 - Buddy CKPT 송신 오류는 WARN 후 계산을 계속하고 Coordinator 연결 오류는 치명적 오류로 기록한다. CRASH 판정은 EOF로 대체하지 않는다.
 - CRASHED에서는 받은 메시지를 읽고 버리되 RESTART·BYE는 처리한다. REJOINING에서는 CKPT를 저장하고 REJOIN을 보내지만 Compute·HB는 WELCOME까지 대기한다.
@@ -277,7 +279,7 @@ Coordinator의 elapsed_ms와 last_hb_elapsed_ms는 START 시각을 0으로 한 �
 
 연속 Buddy 검증은 W4→W5뿐 아니라 **W10→W1**도 포함한다. W4 작업 A를 W5에 인계한 뒤 W5까지 죽으면 W5의 원래 작업 B와 인계 작업 A를 모두 다음 ALIVE에 다시 넘긴다. A는 epoch 1→2→3으로 진행하고, CKPT가 사라졌으면 처음부터 계산한다.
 
-## 8. 개발 순서와 완료 기준
+## 8. 구현 단계와 완료 기준
 
 | 단계 | 각자 구현하면서 함께 연결할 범위 | 통합 통과 기준 |
 | --- | --- | --- |
@@ -288,13 +290,9 @@ Coordinator의 elapsed_ms와 last_hb_elapsed_ms는 START 시각을 0으로 한 �
 | 4. 반복·이웃 장애 연결 | 실제 프로그램으로 재인계·메시지 경쟁, 이후 무작위 Launcher | 기존 인계 Task 누락 없음, 동시 장애 ≤2, stale 결과 거부, W10·W1 경계도 통과 |
 | 5. 제출 실행 | 안선효 AWS 배포·로그 분석·취합, 황대겸 Worker 확인, 황왕석 Launcher 확인 | AWS TCP 4575 + delay 100에서 동일 실행 로그 12개, 정합성 PASS, 문서·영상·ZIP 검증 |
 
-**통합은 모든 담당의 구현이 끝난 뒤 한 번 하는 작업이 아니다.** 기능을 추가할 때마다 직전까지 통과한 실제 연결 검사를 다시 확인한다. 독립 테스트는 담당 내부 로직 확인에 사용하고, 상대 프로그램과 연결되는 기능은 실제 상대와의 검사까지 통과해야 완료로 처리한다.
+각 담당은 자기 파트를 확인하고, 프로그램 간 연결과 최종 결과는 전체 구성으로 확인한다. 정식 실행에는 실제 Coordinator·Worker·Launcher를 사용한다.
 
-PR에는 독립 테스트 결과와 실제 연결 결과를 구분해 기록한다. 현재 단계의 실제 연결이 깨졌다면 해당 기능은 통합 미완료로 표시한다. 다음 단계로 넘어가기 전에 재현 로그로 원인을 좁히고 소유 담당이 수정한다. 여러 스레드·TCP 연결의 전역 메시지 순서를 하나로 고정하지 않고, Task별 owner·epoch·Commit 조건과 필요한 선후 관계를 검사한다.
-
-기능 PR을 통합할 때는 최신 기준 브랜치에 맞춘 뒤 단계별 연결 결과를 확인한다. 공통 변경으로 호출부가 깨지면 관련 수정까지 묶어 검증하고 공통 코드만 먼저 반영하지 않는다. 최종 정식 실행에는 실제 세 프로그램만 사용한다. 실제 수행한 검증 범위와 결과는 9절에 구분해 기록한다.
-
-## 9. Coordinator·로그 분석기 구현과 검증
+## 9. Coordinator·로그 분석기 구성
 
 - Coordinator는 Main 외 Listener 1개·Dispatcher 6개·FD 1개만 만든다. 요청·상태·종료 대기는 Queue/Condition을 사용한다. 로그 전용 스레드는 없다.
 - RESULT의 Worker 상태는 Worker Table Lock에서 읽고, 해당 Task Lock에서 epoch·owner 확인과 Commit을 묶는다. REQ의 상태 확인·PENDING 추출·Task 배정은 Worker Table Lock 구간에서 원자적으로 처리한다.
@@ -317,12 +315,6 @@ python -m unittest discover -s tests/tools -v
 ```
 
 `--allow-no-crashes`는 무장애 개발 로그에만 사용한다. 잘못된 파일·혼합 run_id·중복 Commit·오래된 owner/epoch·불완전 종료는 실패로 반환하며 CLI 종료 코드는 PASS=0, FAIL=1이다. 동일 run_id/로그 폴더를 재사용하지 않는다.
-
-현재 변경에 대해 Coordinator 테스트 12개, 분석기 테스트 16개가 통과했다. 실제 전체본의 **로컬** 100ms·seed 42 실행에서 Worker 10개, 장애 6회, 1,000 DONE·Commit 1,000개·이중 Commit 0·합계 5,761,455와 전체 정상 종료를 다시 확인했다. 최신 실행시간 약 119.562초이며 동일 실행 로그 12개 분석은 PASS다. POOL 24건의 세 상태 목록·개수 일치와 시연 콘솔의 배정·인계·재합류·Commit·최종 PASS 표시도 확인했다. 이 자료는 AWS 정식 실행·영상의 증거로 사용하지 않는다.
-
-전체본의 모듈별 검증 결과는 공통 16개·Launcher 17개·Worker 27개·Coordinator 12개·분석기 16개, 고유 테스트 88개 통과다. 이번 변경에서는 Coordinator·분석기를 재검증하고, 앞서 통과한 다른 모듈의 구현·테스트는 유지했다. Worker는 실제 공통 API와 실행 진입점으로도 호환 검증했다. 정상·무작위 장애와 개발용 수동 W4→W5→W6 / W10→W1→W2 실행에서 각각 1,000 Task 완료·중복 Commit 0·동일 합계·정상 종료를 확인했다. 수동 실행에서는 원래 Task와 인계 Task의 재인계 및 epoch 1→2→3, CKPT 유실 후 step 1·partial 0 재시작을 확인했다.
-
-공통 로거는 표준 라이브러리의 고정 UTC+9 시간대를 사용하며 Windows에서도 외부 시간대 데이터 없이 KST 기록이 검증됐다. AWS 배포·원격 정식 실행·영상·최종 ZIP은 남은 작업이다.
 
 ## 10. 제출물
 

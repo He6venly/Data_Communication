@@ -1,8 +1,4 @@
-"""No I/O here. Nested locks: Worker Table -> one Task -> done condition.
-
-RESULT releases the Worker lock before taking its Task lock, as in the spec.
-An event's seq/elapsed_ms describe the decision, not a delayed file write.
-"""
+# Task·Worker 상태와 배정·인계를 관리한다.
 
 from collections import deque
 from dataclasses import dataclass, field
@@ -206,7 +202,7 @@ class Tables:
             for worker_id in newly_dead:
                 self.workers[worker_id].state = "DEAD"
             dead_now = [i for i, w in self.workers.items() if w.state == "DEAD"]
-            for source in newly_dead:  # dict insertion order is worker number order.
+            for source in newly_dead:
                 worker = self.workers[source]
                 target = self.next_alive(source)
                 worker.crash_count += 1

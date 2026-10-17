@@ -1,7 +1,11 @@
+# Launcher 메시지 처리·종료·실행 인자를 테스트한다.
+
 import argparse
 import selectors
 import socket
 import unittest
+from pathlib import Path
+from unittest.mock import ANY, Mock, patch
 
 from hw3.common.protocol import Message, encode
 from hw3.launcher.__main__ import Launcher, LauncherConfig, build_parser, parse_coord
@@ -98,6 +102,29 @@ class CliTests(unittest.TestCase):
         )
         self.assertEqual(10, args.workers)
         self.assertEqual(100, args.step_delay)
+
+
+class CompletionTests(unittest.TestCase):
+    def test_nonzero_worker_exit_is_not_successful_completion(self) -> None:
+        launcher = object.__new__(Launcher)
+        launcher.config = LauncherConfig("host:4575", 10, "127.0.0.1", 7000, 100, 42, "test", Path("logs"))
+        from hw3.launcher.chaos import ChaosController
+        launcher.controller = ChaosController(seed=42)
+        launcher.logger = Mock()
+        launcher.selector = Mock()
+        launcher.processes = {}
+        launcher._connect_controls = Mock()
+        launcher._event_loop = Mock()
+        processes = {i: Mock(pid=i) for i in range(1, 11)}
+        for process in processes.values():
+            process.poll.return_value = 0
+            process.wait.return_value = 0
+        processes[4].poll.return_value = 1
+        processes[4].wait.return_value = 1
+        with patch("hw3.launcher.__main__.start_workers", return_value=processes):
+            with self.assertRaisesRegex(RuntimeError, "Worker 4"):
+                launcher.run()
+        launcher.logger.write.assert_any_call("TERMINATE", "FAIL", ANY)
 
 
 if __name__ == "__main__":

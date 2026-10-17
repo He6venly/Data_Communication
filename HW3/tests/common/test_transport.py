@@ -1,3 +1,5 @@
+# 줄 단위 수신과 동시 송신을 테스트한다.
+
 import socket
 import threading
 import unittest

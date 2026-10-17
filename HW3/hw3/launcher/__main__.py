@@ -1,4 +1,4 @@
-"""HW3 Chaos Launcher의 명령행 진입점."""
+# Worker를 실행하고 무작위 장애를 주입한다.
 
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ from hw3.launcher.chaos import ChaosController, WorkerStatus
 from hw3.launcher.processes import start_workers, stop_processes
 
 
-@dataclass(slots=True)
+@dataclass
 class LauncherConfig:
     coord: str
     workers: int
@@ -74,6 +74,10 @@ class Launcher:
                 )
             self._connect_controls()
             self._event_loop()
+            for worker_id, process in self.processes.items():
+                exit_code = process.wait(timeout=5.0)
+                if exit_code != 0:
+                    raise RuntimeError(f"Worker {worker_id} exited with code {exit_code}")
             normal_exit = True
             self.logger.write(
                 "TERMINATE", "SUCCESS", {"exited_workers": self.config.workers}

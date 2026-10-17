@@ -1,3 +1,5 @@
+# 소수 계산과 Worker 상태 전이를 테스트한다.
+
 import threading
 import unittest
 
@@ -15,7 +17,6 @@ class PrimeTests(unittest.TestCase):
                 step_bounds(task, step)
 
     def test_task_zero_step_cumulative_against_independent_sieve(self):
-        # Ordinary sieve over a whole task, independent of the segmented implementation.
         flags = [True] * 100001
         flags[0] = flags[1] = False
         for p in range(2, 317):

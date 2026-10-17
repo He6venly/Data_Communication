@@ -1,3 +1,5 @@
+# 로그 형식과 동시 기록을 테스트한다.
+
 import json
 import re
 import tempfile

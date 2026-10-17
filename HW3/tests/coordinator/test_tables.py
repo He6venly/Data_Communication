@@ -1,3 +1,5 @@
+# Task·Worker 상태 전이와 배정·인계를 테스트한다.
+
 import threading
 import unittest
 from types import SimpleNamespace
@@ -141,7 +143,7 @@ class TablesTests(unittest.TestCase):
         self.alive_except(4)
         self.tables.detect()
         self.now = 6
-        self.tables.result(5, 0, 2, 5761455)  # Synthetic accepted result for summary testing.
+        self.tables.result(5, 0, 2, 5761455)
         self.now = 6.5
         self.tables.rejoin(4)
         self.now = 7

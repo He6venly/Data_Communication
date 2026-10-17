@@ -1,3 +1,5 @@
+# Coordinator 통신·출력·종료를 테스트한다.
+
 from contextlib import redirect_stdout
 import io
 import socket
@@ -50,7 +52,6 @@ class RuntimeTests(unittest.TestCase):
         writes = []
         class Socket:
             def sendall(self, data):
-                # Socket ordering lock is allowed; state locks during I/O are not.
                 for lock in (app.tables.lock, app.tables.tasks[0].lock):
                     if not lock.acquire(blocking=False):
                         raise AssertionError("business lock held during send")

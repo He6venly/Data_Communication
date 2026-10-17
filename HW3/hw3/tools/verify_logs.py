@@ -1,4 +1,4 @@
-"""Check a single run's twelve logs; a PASS is not proof of remote deployment."""
+# 동일 실행 로그 12개의 정합성과 복구 지표를 검사한다.
 
 import argparse
 from collections import Counter

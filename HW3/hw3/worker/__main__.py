@@ -1,4 +1,4 @@
-"""Run from HW3: python -m hw3.worker (common modules required)."""
+# Worker를 실행하고 종료한다.
 
 import argparse
 import os
@@ -7,12 +7,12 @@ import sys
 
 
 def arguments(argv=None):
-    parser = argparse.ArgumentParser(description="HW3 Worker (황대겸 담당)")
+    parser = argparse.ArgumentParser(description="HW3 Worker")
     parser.add_argument("--id", type=int, required=True, choices=range(1, 11))
     parser.add_argument("--coord", required=True, metavar="HOST:PORT")
     parser.add_argument("--peer-ip", default="127.0.0.1")
     parser.add_argument("--peer-port", type=int, required=True)
-    parser.add_argument("--step-delay", type=int, default=100, help="milliseconds per step")
+    parser.add_argument("--step-delay", type=int, default=100, help="step당 지연 시간(ms)")
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--log-dir", required=True)
     args = parser.parse_args(argv)
@@ -31,17 +31,11 @@ def arguments(argv=None):
 def main(argv=None):
     args = arguments(argv)
     if sys.version_info < (3, 12):
-        print("HW3 requires Python 3.12 or newer", file=sys.stderr)
+        print("Python 3.12 이상이 필요합니다.", file=sys.stderr)
         return 2
-    try:
-        from hw3.common.log import NodeLogger
-        from hw3.common.settings import CONTRACT_VERSION
-        from .network import Worker, WorkerConfig
-    except ModuleNotFoundError as error:
-        if error.name and error.name.startswith("hw3.common"):
-            print("공통 모듈 hw3.common이 필요합니다. 황왕석 담당 공통 구현을 통합한 뒤 실행하세요.", file=sys.stderr)
-            return 2
-        raise
+    from hw3.common.log import NodeLogger
+    from hw3.common.settings import CONTRACT_VERSION
+    from .network import Worker, WorkerConfig
     log_dir = Path(args.log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
     logger = NodeLogger(f"Worker{args.id}", log_dir / f"Worker{args.id}.txt", args.run_id)

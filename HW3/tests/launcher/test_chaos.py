@@ -1,3 +1,5 @@
+# 장애 주입 간격과 Worker 상태 전이를 테스트한다.
+
 import unittest
 
 from hw3.launcher.chaos import ChaosController, WorkerStatus

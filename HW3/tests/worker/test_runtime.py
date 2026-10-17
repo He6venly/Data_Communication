@@ -1,4 +1,4 @@
-"""Real Worker threads/TCP; Coordinator, Buddy and Launcher are explicit doubles."""
+# Worker 통신과 장애·복구·종료를 테스트한다.
 
 from collections import deque
 import json
@@ -12,9 +12,7 @@ import threading
 import time
 import unittest
 
-from contract_double import install, Message, parse
-
-install()
+from hw3.common.protocol import Message, parse
 from hw3.worker.network import Channel, Worker, WorkerConfig
 from hw3.worker.heartbeat import heartbeat_loop
 from hw3.worker.primes import count_step
@@ -179,7 +177,7 @@ class RuntimeTests(unittest.TestCase):
         for step in range(1, 10):
             partial += count_step(0, step)
             self.assertEqual(h.buddy.receive("CKPT").fields, ("0", "1", str(step), str(partial)))
-        h.coord.receive("REQ")  # Does not wait for ACK.
+        h.coord.receive("REQ")
         h.coord.send("ASSIGN 152 1\nACK 0")
         self.assertEqual(h.coord.receive("RESULT").fields, ("152", "1", "6075"))
 
@@ -210,7 +208,6 @@ class RuntimeTests(unittest.TestCase):
             h.logger.wait("CRASH", crash_count=cycle)
             with h.worker.state.locked():
                 self.assertFalse(h.worker.state.store or h.worker.state.queue or h.worker.state.current)
-            # Drain pre-CRASH messages, then check both preserved TCP connections.
             h.coord.quiet(0.1)
             h.buddy.quiet(0.1)
             h.coord.send("ASSIGN 271 1\nTAKEOVER 160 2 from=4\nNO_TASK")
@@ -225,7 +222,6 @@ class RuntimeTests(unittest.TestCase):
                 h.logger.wait("RETRY_LATER")
                 self.assertFalse(any(m.kind == "REJOIN" for m in h.coord.quiet(0.3)))
                 h.coord.receive("REJOIN", timeout=3)
-            # REJOINING can store CKPT but cannot compute or heartbeat.
             prev.send("CKPT 271 1 1 500")
             h.logger.wait("CKPT", direction="receive", task=271)
             self.assertEqual(h.worker.state.mode, "REJOINING")
@@ -424,7 +420,6 @@ class SendBoundaryTests(unittest.TestCase):
 
 class ConsecutiveBuddyTests(unittest.TestCase):
     def test_original_and_inherited_tasks_survive_two_adjacent_crashes(self):
-        # Real Worker -> Worker CKPT path. Only ownership/CRASH commands are doubles.
         for ids in ((4, 5, 6), (10, 1, 2)):
             with self.subTest(ids=ids):
                 server, last_buddy = listener(), listener()
@@ -468,7 +463,6 @@ class ConsecutiveBuddyTests(unittest.TestCase):
                     workers[2].logger.wait("CKPT", direction="receive", task=160, step=1)
                     launchers[1].send("CRASH")
                     workers[1].logger.wait("CRASH", crash_count=1)
-                    # DEAD Worker owned both its original Task and the queued inherited Task.
                     coords[2].send(f"TAKEOVER 152 3 from={ids[1]}\nTAKEOVER 160 2 from={ids[1]}")
                     results = [coords[2].receive("RESULT").fields for _ in range(3)]
                     self.assertEqual(results, [("271", "1", "5802"), ("152", "3", "6075"), ("160", "2", "5989")])
@@ -504,10 +498,10 @@ class ProcessTests(unittest.TestCase):
                     sock.close()
                 for worker_id, port in enumerate(ports, 1):
                     processes.append(subprocess.Popen([
-                        sys.executable, str(Path(__file__).with_name("run_with_contract_double.py")),
+                        sys.executable, "-m", "hw3.worker",
                         "--id", str(worker_id), "--coord", f"127.0.0.1:{server.getsockname()[1]}",
                         "--peer-port", str(port), "--step-delay", "0", "--run-id", "ring-test", "--log-dir", folder,
-                    ], stdout=subprocess.PIPE, stderr=subprocess.PIPE))
+                    ], cwd=Path(__file__).resolve().parents[2], stdout=subprocess.PIPE, stderr=subprocess.PIPE))
                 for _ in range(10):
                     coord = Wire(server.accept()[0])
                     hello = coord.receive("HELLO")
@@ -579,7 +573,7 @@ class ProcessTests(unittest.TestCase):
                         try:
                             process.communicate(timeout=4)
                         except subprocess.TimeoutExpired:
-                            process.terminate()  # Only this test's own process handle.
+                            process.terminate()
                             process.communicate(timeout=4)
                 for wire in (*coords.values(), *launchers.values()):
                     wire.close()
@@ -593,14 +587,14 @@ class ProcessTests(unittest.TestCase):
         wires = []
         with tempfile.TemporaryDirectory(prefix="hw3-worker-test-") as folder:
             try:
-                # Allocate an exclusive port for this test; no pre-existing process is touched.
                 reservation = listener()
                 peer_port = reservation.getsockname()[1]
                 reservation.close()
-                process = subprocess.Popen([sys.executable, str(Path(__file__).with_name("run_with_contract_double.py")),
+                process = subprocess.Popen([sys.executable, "-m", "hw3.worker",
                                             "--id", "1", "--coord", f"127.0.0.1:{coord_server.getsockname()[1]}",
                                             "--peer-port", str(peer_port), "--step-delay", "10",
                                             "--run-id", "process-test", "--log-dir", folder],
+                                           cwd=Path(__file__).resolve().parents[2],
                                            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                 coord = Wire(coord_server.accept()[0]); wires.append(coord)
                 self.assertEqual(coord.receive("HELLO").fields[0], "1")
@@ -616,7 +610,6 @@ class ProcessTests(unittest.TestCase):
                 coord.send("ASSIGN 0 1")
                 self.assertEqual(coord.receive("RESULT").fields, ("0", "1", "9592"))
                 launcher.send("CRASH")
-                # Wait for observable CRASH transition in this process's owned log.
                 deadline = time.monotonic() + 2
                 log = Path(folder) / "Worker1.txt"
                 while time.monotonic() < deadline and " | CRASH | " not in log.read_text(encoding="utf-8"):
@@ -631,7 +624,6 @@ class ProcessTests(unittest.TestCase):
                 self.assertEqual(termination["run_id"], "process-test")
             finally:
                 if process is not None and process.poll() is None:
-                    # Only this test's directly-created process handle, after cooperative shutdown.
                     process.terminate()
                     process.communicate(timeout=4)
                 for wire in wires:
