@@ -1,5 +1,0 @@
-*.txt text eol=lf
-*.md text eol=lf
-*.py text eol=lf
-*.java text eol=lf
-.gitkeep text eol=lf
