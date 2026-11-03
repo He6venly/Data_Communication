@@ -11,6 +11,7 @@ import time
 VALID_COUNT = (1, 4, 5, 6, 7, 8)
 
 
+# 실행 중인 자식 Worker를 종료하고 남은 프로세스까지 정리한다.
 def stop_processes(processes):
     for process in processes:
         if process.poll() is None:
@@ -26,6 +27,7 @@ def stop_processes(processes):
             process.wait()
 
 
+# 실패한 Worker의 임시 stdout과 stderr 내용을 출력한다.
 def show_diagnostics(files):
     for kind, k, path in files:
         try:
@@ -37,6 +39,7 @@ def show_diagnostics(files):
             print(text, end="" if text.endswith("\n") else "\n", file=sys.stderr)
 
 
+# 같은 명령으로 N개 Worker를 실행하고 하나가 실패하면 전체를 종료한다.
 def launch(count, command):
     if count not in VALID_COUNT:
         raise ValueError("Worker 수는 1 또는 4~8이어야 합니다")
@@ -81,6 +84,7 @@ def launch(count, command):
                     handle.close()
 
 
+# Worker 수와 -- 뒤의 실제 실행 명령을 입력받는다.
 def parser():
     result = argparse.ArgumentParser(description="HW4 Worker 프로세스 실행 보조")
     result.add_argument("--count", type=int, choices=VALID_COUNT, required=True)
@@ -89,6 +93,7 @@ def parser():
     return result
 
 
+# 실행 보조 결과를 자식 프로세스 종료 코드로 반환한다.
 def main(argv=None):
     args = parser().parse_args(argv)
     command = args.command[1:] if args.command[:1] == ["--"] else args.command

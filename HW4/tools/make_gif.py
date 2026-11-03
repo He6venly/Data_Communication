@@ -18,6 +18,7 @@ FONT_PATHS = (
 COLORS = ((127, 224, 255), (255, 150, 125), (205, 180, 255))
 
 
+# 운영체제별 후보에서 사용할 수 있는 고정폭 글꼴을 찾는다.
 def load_font(ImageFont, size):
     for path in FONT_PATHS:
         try:
@@ -27,6 +28,7 @@ def load_font(ImageFont, size):
     raise OSError("사용할 수 있는 고정폭 글꼴을 찾지 못했습니다")
 
 
+# 저장된 문자 frame을 Worker 경계와 상태 번호가 보이는 그림으로 바꾼다.
 def render_frames(run_dir, n):
     try:
         from PIL import Image, ImageDraw, ImageFont
@@ -58,6 +60,7 @@ def render_frames(run_dir, n):
     return images, durations
 
 
+# 저장된 GIF의 프레임 수와 처음·마지막 상태를 다시 디코딩해 검사한다.
 def validate_saved_gif(path, expected_first, expected_last):
     from PIL import Image, ImageChops
 
@@ -85,6 +88,7 @@ def validate_saved_gif(path, expected_first, expected_last):
             raise ValueError("GIF의 마지막 그림이 round3000 상태와 다릅니다")
 
 
+# 유효한 실행의 frame 301장으로 GIF를 만들고 저장 결과를 검증한다.
 def make_gif(run_dir, output):
     info, errors, _ = verify_run_directory(run_dir)
     if errors:
@@ -113,6 +117,7 @@ def make_gif(run_dir, output):
     return []
 
 
+# GIF 생성에 필요한 실행 폴더와 출력 파일 인자를 정의한다.
 def parser():
     result = argparse.ArgumentParser(description="HW4 진행 GIF 생성")
     result.add_argument("--run-dir", type=Path, required=True)
@@ -120,6 +125,7 @@ def parser():
     return result
 
 
+# GIF 생성 결과의 프레임 수와 파일 크기를 출력한다.
 def main(argv=None):
     args = parser().parse_args(argv)
     try:

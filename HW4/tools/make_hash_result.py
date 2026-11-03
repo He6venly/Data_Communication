@@ -8,6 +8,7 @@ from .formats import SNAPSHOT_ROUNDS
 from .verify_run import verify_run_directory
 
 
+# 기준 실행과 분산 실행 두 개의 메타정보와 유효성을 확인한다.
 def validate_runs(team, baseline, run_a, run_b):
     named = (("baseline", Path(baseline)), ("run-a", Path(run_a)),
              ("run-b", Path(run_b)))
@@ -37,6 +38,7 @@ def validate_runs(team, baseline, run_a, run_b):
     return runs, errors
 
 
+# 세 실행의 31개 해시를 비교해 hash_result 파일을 작성한다.
 def make_result(team, baseline, run_a, run_b, output):
     runs, errors = validate_runs(team, baseline, run_a, run_b)
     if errors:
@@ -65,6 +67,7 @@ def make_result(team, baseline, run_a, run_b, output):
     return [], passed
 
 
+# 명령행의 조 번호가 양의 정수인지 확인한다.
 def positive_int(value):
     number = int(value)
     if number <= 0:
@@ -72,6 +75,7 @@ def positive_int(value):
     return number
 
 
+# 세 실행 폴더와 hash_result 출력 경로 인자를 정의한다.
 def parser():
     result = argparse.ArgumentParser(description="HW4 세 실행 해시 비교")
     result.add_argument("--team", type=positive_int, required=True)
@@ -82,6 +86,7 @@ def parser():
     return result
 
 
+# 해시 비교 결과에 따라 PASS 또는 FAIL 종료 코드를 반환한다.
 def main(argv=None):
     args = parser().parse_args(argv)
     try:

@@ -10,6 +10,7 @@ from .formats import (FRAME_ROUNDS, HASH_RE, RUN_ID_RE, SNAPSHOT_ROUNDS,
                       load_json, read_grid, read_log, read_round_hash, sha256_hex)
 
 
+# 특정 이벤트 로그가 정확히 한 번 있는지 확인한다.
 def one_record(records, event, status, errors, label):
     found = event_records(records, event, status)
     if len(found) != 1:
@@ -18,26 +19,31 @@ def one_record(records, event, status, errors, label):
     return found[0]
 
 
+# 로그 필드가 예상한 값과 같은지 항목별로 비교한다.
 def check_fields(fields, expected, errors, label):
     for name, value in expected.items():
         if fields.get(name) != value:
             errors.append(f"{label}: {name} 값이 {value!r}와 다릅니다")
 
 
+# 로그에 반드시 있어야 하는 필드가 빠지지 않았는지 확인한다.
 def require_fields(fields, names, errors, label):
     missing = [name for name in names if name not in fields]
     if missing:
         errors.append(f"{label}: 필수 필드가 없습니다 ({', '.join(missing)})")
 
 
+# 값이 음수가 아닌 유한한 수인지 확인한다.
 def nonnegative_number(value):
     return is_number(value) and value >= 0
 
 
+# 값이 bool이 아닌 음수 없는 정수인지 확인한다.
 def nonnegative_int(value):
     return is_int(value) and value >= 0
 
 
+# Worker별 최지연 횟수의 키, 정수 범위와 전체 합계를 검사한다.
 def validate_slowest_counts(value, n, expected_total, errors, label):
     if not isinstance(value, dict) or set(value) != {str(k) for k in range(n)}:
         errors.append(f"{label}: slowest_counts의 Worker 번호가 잘못됐습니다")
@@ -51,6 +57,7 @@ def validate_slowest_counts(value, n, expected_total, errors, label):
     return value
 
 
+# 100회 단위 요약 30개의 범위와 순서가 맞는지 확인한다.
 def check_summary_ranges(records, event, errors, label, k=None):
     found = event_records(records, event, "INFO")
     if k is not None:
@@ -70,6 +77,7 @@ def check_summary_ranges(records, event, errors, label, k=None):
         errors.append(f"{label}: {event} 요약 범위나 순서가 잘못됐습니다")
 
 
+# run_info.json의 실행 조건과 입력 canvas 해시 형식을 검사한다.
 def validate_run_info(run_dir, errors):
     try:
         info = load_json(run_dir / "run_info.json")
@@ -119,6 +127,7 @@ def validate_run_info(run_dir, errors):
     return checked
 
 
+# round와 frame의 파일 목록, 형식, 기록 해시를 검사한다.
 def validate_snapshots(run_dir, info, errors):
     expected_rounds = {f"round{r:04d}.txt" for r in SNAPSHOT_ROUNDS}
     # Windows의 glob은 대소문자를 구분하지 않아 RoundHash.txt도 잡힐 수 있다.
@@ -173,6 +182,7 @@ def validate_snapshots(run_dir, info, errors):
     return round_data, frame_data, recorded
 
 
+# 모든 노드 로그에 공통인 run_id와 실패 기록을 검사한다.
 def validate_common_log(records, run_id, errors, label):
     for record in records:
         if run_id is not None and record["fields"].get("run_id") != run_id:
@@ -181,6 +191,7 @@ def validate_common_log(records, run_id, errors, label):
             errors.append(f"{label}: FAIL 로그가 포함되어 있습니다")
 
 
+# Assigner의 접속, 저장, 통계, 종료 로그를 실행 결과와 대조한다.
 def validate_assigner_log(run_dir, info, frame_data, errors):
     path = run_dir / "logs" / "Assigner.txt"
     try:
@@ -367,6 +378,7 @@ def validate_assigner_log(run_dir, info, frame_data, errors):
             errors.append("Assigner TERMINATE: full_avg_bytes 계산이 잘못됐습니다")
 
 
+# Worker 한 개의 할당, 시간, REPAINT, 종료 로그를 검사한다.
 def validate_worker_log(run_dir, info, k, errors):
     path = run_dir / "logs" / f"Worker{k}.txt"
     try:
@@ -419,6 +431,7 @@ def validate_worker_log(run_dir, info, k, errors):
             errors.append(f"Worker{k} TERMINATE: 평균 계산시간은 음수가 아닌 수여야 합니다")
 
 
+# Assigner와 Worker0~N-1 로그 파일 구성을 모두 검사한다.
 def validate_logs(run_dir, info, frame_data, errors):
     if info is None:
         return
@@ -436,6 +449,7 @@ def validate_logs(run_dir, info, frame_data, errors):
         validate_worker_log(run_dir, info, k, errors)
 
 
+# 한 실행 폴더의 메타정보, snapshot, 로그를 순서대로 종합 검사한다.
 def verify_run_directory(run_dir):
     run_dir = Path(run_dir)
     errors = []
@@ -447,12 +461,14 @@ def verify_run_directory(run_dir):
     return info, errors, hashes
 
 
+# 실행 결과 검사에 사용할 실행 폴더 인자를 정의한다.
 def parser():
     result = argparse.ArgumentParser(description="HW4 실행 결과 검사")
     result.add_argument("--run-dir", type=Path, required=True)
     return result
 
 
+# 발견한 오류를 출력하고 검사 성공 여부를 종료 코드로 반환한다.
 def main(argv=None):
     args = parser().parse_args(argv)
     _, errors, _ = verify_run_directory(args.run_dir)

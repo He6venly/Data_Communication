@@ -48,6 +48,7 @@ LAYOUTS = (
 INK = ("#", "@", "+")
 
 
+# 5x7 글꼴을 가로로 두껍게 그려 canvas에 문구를 배치한다.
 def draw_text(board, text, x, y, ink):
     cursor = x
     for character in text:
@@ -67,6 +68,7 @@ def draw_text(board, text, x, y, ink):
         cursor += 11
 
 
+# 조 번호와 seed를 사용해 서로 다른 canvas 세 장을 만든다.
 def make_boards(team, seed):
     boards = []
     for index, layout in enumerate(LAYOUTS):
@@ -82,6 +84,7 @@ def make_boards(team, seed):
     return tuple(boards)
 
 
+# 명령행에서 받은 값을 양의 정수로 제한한다.
 def positive_int(value):
     number = int(value)
     if number <= 0:
@@ -89,6 +92,7 @@ def positive_int(value):
     return number
 
 
+# canvas 생성에 필요한 조 번호, seed, 출력 폴더 인자를 정의한다.
 def parser():
     result = argparse.ArgumentParser(description="HW4 canvas 세 장 생성")
     result.add_argument("--team", type=positive_int, required=True)
@@ -97,6 +101,7 @@ def parser():
     return result
 
 
+# 빈 출력 폴더에 canvas 세 장을 저장하고 전체 해시를 반환한다.
 def run(team, seed, out_dir):
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -110,6 +115,7 @@ def run(team, seed, out_dir):
     return hashes
 
 
+# canvas 생성 결과와 SHA-256을 사용자에게 출력한다.
 def main(argv=None):
     args = parser().parse_args(argv)
     try:

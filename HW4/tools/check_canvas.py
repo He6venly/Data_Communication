@@ -7,6 +7,7 @@ import sys
 from .formats import FormatError, read_grid, sha256_hex
 
 
+# canvas 한 장의 형식, 점 비율, 글자 획과 해시를 검사한다.
 def inspect_canvas(path):
     data, rows = read_grid(path)
     text = "".join(rows)
@@ -23,6 +24,7 @@ def inspect_canvas(path):
             "dot_ratio": ratio, "ink": ink, "errors": errors}
 
 
+# 폴더의 canvas0~2를 검사하고 세 그림이 서로 다른지도 확인한다.
 def check_directory(directory):
     directory = Path(directory)
     results = []
@@ -40,12 +42,14 @@ def check_directory(directory):
     return results, errors
 
 
+# canvas 검사 명령행 인자를 정의한다.
 def parser():
     result = argparse.ArgumentParser(description="HW4 canvas 형식 검사")
     result.add_argument("--canvas-dir", type=Path, required=True)
     return result
 
 
+# 검사 결과를 출력하고 성공 여부를 종료 코드로 반환한다.
 def main(argv=None):
     args = parser().parse_args(argv)
     results, errors = check_directory(args.canvas_dir)

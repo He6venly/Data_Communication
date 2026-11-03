@@ -22,23 +22,28 @@ LOG_RE = re.compile(
 )
 
 
+# 파일이나 로그 형식이 과제 규약과 다를 때 사용하는 예외다.
 class FormatError(ValueError):
     """입력이나 산출물의 형식이 계약과 다를 때 사용한다."""
 
 
+# bool을 제외한 실제 정수인지 확인한다.
 def is_int(value):
     return isinstance(value, int) and not isinstance(value, bool)
 
 
+# 무한대와 NaN이 아닌 유한한 수인지 확인한다.
 def is_number(value):
     return (isinstance(value, (int, float)) and not isinstance(value, bool)
             and math.isfinite(value))
 
 
+# 바이트 데이터의 전체 SHA-256 값을 계산한다.
 def sha256_hex(data):
     return sha256(data).hexdigest()
 
 
+# ASCII와 LF로 저장된 80x160 그림 파일을 검사하고 읽는다.
 def read_grid(path):
     """80x160, 출력 가능한 ASCII, LF 형식의 그림을 읽는다."""
     path = Path(path)
@@ -62,6 +67,7 @@ def read_grid(path):
     return data, tuple(row.decode("ascii") for row in rows[:-1])
 
 
+# 80x160 그림을 마지막 LF까지 포함한 바이트 형식으로 저장한다.
 def write_grid(path, rows):
     if len(rows) != HEIGHT or any(len(row) != WIDTH for row in rows):
         raise ValueError("저장할 그림은 80x160이어야 합니다")
@@ -70,6 +76,7 @@ def write_grid(path, rows):
     return data
 
 
+# NaN과 무한대를 허용하지 않고 JSON 객체를 읽는다.
 def load_json(path):
     path = Path(path)
 
@@ -86,6 +93,7 @@ def load_json(path):
     return result
 
 
+# RoundHash.txt의 31개 해시와 순서를 검사한다.
 def read_round_hash(path):
     path = Path(path)
     try:
@@ -107,6 +115,7 @@ def read_round_hash(path):
     return result
 
 
+# 한 줄 단위 노드 로그를 JSON 필드로 분리해 읽는다.
 def read_log(path, expected_node=None):
     path = Path(path)
     try:
@@ -138,6 +147,7 @@ def read_log(path, expected_node=None):
     return records
 
 
+# 읽은 로그에서 원하는 이벤트와 상태만 골라낸다.
 def event_records(records, event, status=None):
     return [record for record in records
             if record["event"] == event and (status is None or record["status"] == status)]
