@@ -58,6 +58,33 @@ def render_frames(run_dir, n):
     return images, durations
 
 
+def validate_saved_gif(path, expected_first, expected_last):
+    from PIL import Image, ImageChops
+
+    with Image.open(path) as gif:
+        if gif.size != (1000, 830):
+            raise ValueError("생성된 GIF 크기가 잘못됐습니다")
+        if getattr(gif, "n_frames", 1) != 301:
+            raise ValueError("생성된 GIF는 실제 301프레임이어야 합니다")
+
+        decoded_first = None
+        decoded_last = None
+        for index in range(301):
+            gif.seek(index)
+            gif.load()
+            if index == 0:
+                decoded_first = gif.convert("RGB")
+            elif index == 300:
+                decoded_last = gif.convert("RGB")
+
+        if ImageChops.difference(decoded_first,
+                                 expected_first.convert("RGB")).getbbox() is not None:
+            raise ValueError("GIF의 처음 그림이 canvas0 상태와 다릅니다")
+        if ImageChops.difference(decoded_last,
+                                 expected_last.convert("RGB")).getbbox() is not None:
+            raise ValueError("GIF의 마지막 그림이 round3000 상태와 다릅니다")
+
+
 def make_gif(run_dir, output):
     info, errors, _ = verify_run_directory(run_dir)
     if errors:
@@ -74,15 +101,7 @@ def make_gif(run_dir, output):
             temp_path = Path(temp.name)
         images[0].save(temp_path, save_all=True, append_images=images[1:],
                        duration=durations, loop=0, optimize=False, disposal=2)
-        from PIL import Image
-        with Image.open(temp_path) as gif:
-            if gif.size != (1000, 830):
-                raise ValueError("생성된 GIF 크기가 잘못됐습니다")
-            if getattr(gif, "n_frames", 1) != 301:
-                raise ValueError("생성된 GIF는 실제 301프레임이어야 합니다")
-            for index in range(301):
-                gif.seek(index)
-                gif.load()
+        validate_saved_gif(temp_path, images[0], images[-1])
         temp_path.replace(output)
     except BaseException:
         if temp_path is not None:
