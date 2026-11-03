@@ -1,4 +1,5 @@
 import json
+import argparse
 from pathlib import Path
 import socket
 import subprocess
@@ -8,6 +9,7 @@ import time
 import unittest
 
 from src.worker.rules import rule3_cell, to_cyclic
+from src.worker.__main__ import parser, run_id_type
 
 ROOT = Path(__file__).resolve().parents[2]
 BLANK = " "*160
@@ -151,3 +153,27 @@ class ClientTests(unittest.TestCase):
             result = subprocess.run([sys.executable, "-m", "src.worker", *base, option, value],
                                     cwd=ROOT, capture_output=True, timeout=5)
             self.assertEqual(result.returncode, 2)
+
+    def test_run_id_valid_boundaries(self):
+        # 한 글자랑 64자 경계에서도 정상 식별자를 그대로 받는지 확인함
+        for value in ("A", "0", "g2-n1_001", "Z" + "a_9-"*15 + "xyz"):
+            with self.subTest(value=value):
+                self.assertEqual(run_id_type(value), value)
+                args = parser().parse_args(["--host", "127.0.0.1", "--port", "9000",
+                                            "--log-dir", "unused", "--run-id", value])
+                self.assertEqual(args.run_id, value)
+
+    def test_run_id_invalid_values_fail_before_connecting(self):
+        # 공백이나 한글, 길이 초과는 접속하거나 로그를 만들기 전에 막아줌
+        with tempfile.TemporaryDirectory() as directory:
+            logdir = Path(directory) / "logs"
+            for value in ("", " ", "run id", " run", "run ", "황대겸", "run한글", "A"*65,
+                          "_run", "-run", "run.id", "run/id", "run\n", "run\t", "Ａrun"):
+                with self.subTest(value=value):
+                    with self.assertRaises(argparse.ArgumentTypeError):
+                        run_id_type(value)
+                    result = subprocess.run([sys.executable, "-m", "src.worker", "--host", "127.0.0.1",
+                        "--port", "9000", "--log-dir", str(logdir), "--run-id="+value],
+                        cwd=ROOT, capture_output=True, timeout=5)
+                    self.assertEqual(result.returncode, 2)
+                    self.assertFalse(logdir.exists())

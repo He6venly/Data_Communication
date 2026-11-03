@@ -2,6 +2,7 @@ import argparse
 from dataclasses import replace
 import math
 from pathlib import Path
+import re
 import socket
 import sys
 import time
@@ -37,13 +38,20 @@ def nonempty(value):
     return value
 
 
+def run_id_type(value):
+    # 영문이나 숫자로 시작하고 허용된 문자로 64자 안에 적었는지 확인함
+    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", value, flags=re.ASCII):
+        return value
+    raise argparse.ArgumentTypeError("실행 식별자는 영문·숫자로 시작하는 1~64자의 영문·숫자·_·-만 허용합니다")
+
+
 def parser():
     # 실행 경로랑 접속할 주소, 통신 제한시간을 실행할 때 입력받음
     result = argparse.ArgumentParser(description="ASCII Evolution Worker")
     result.add_argument("--host", required=True, type=nonempty)
     result.add_argument("--port", required=True, type=port_number)
     result.add_argument("--log-dir", required=True, type=Path)
-    result.add_argument("--run-id", required=True, type=nonempty)
+    result.add_argument("--run-id", required=True, type=run_id_type)
     result.add_argument("--connect-timeout", type=positive_float, default=10.0)
     result.add_argument("--startup-timeout", type=positive_float, default=300.0)
     result.add_argument("--io-timeout", type=positive_float, default=120.0)
