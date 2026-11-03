@@ -15,6 +15,24 @@ def log_line(node, event, status, run_id, **fields):
     return f"[12:34:56.789] {node} | {event} | {status} | {body}\n"
 
 
+def change_log(path, event, updates, occurrence=0):
+    path = Path(path)
+    lines = path.read_text(encoding="utf-8").splitlines()
+    seen = 0
+    for index, line in enumerate(lines):
+        parts = line.split(" | ", 3)
+        if len(parts) != 4 or parts[1] != event:
+            continue
+        if seen == occurrence:
+            fields = json.loads(parts[3])
+            fields.update(updates)
+            parts[3] = json.dumps(fields, ensure_ascii=True, separators=(",", ":"))
+            lines[index] = " | ".join(parts)
+            break
+        seen += 1
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
+
+
 def make_run(root, n=1, n_mode="fixed", team=2, later_character=" ", run_id=None):
     root = Path(root)
     root.mkdir(parents=True)
@@ -55,6 +73,8 @@ def make_run(root, n=1, n_mode="fixed", team=2, later_character=" ", run_id=None
     (root / "RoundHash.txt").write_text("".join(hashes), encoding="ascii", newline="\n")
 
     assigner = []
+    block_counts = {str(k): 100//n + (1 if k < 100 % n else 0) for k in range(n)}
+    total_counts = {key: value * 30 for key, value in block_counts.items()}
     assigner.append(log_line("ASSIGNER", "INIT", "SUCCESS", run_id, n=n, team=team,
                              bands=[80*k//n for k in range(n+1)], n_mode=n_mode,
                              host="127.0.0.1", port=9000,
@@ -81,19 +101,22 @@ def make_run(root, n=1, n_mode="fixed", team=2, later_character=" ", run_id=None
         assigner.append(log_line("ASSIGNER", "BARRIER", "INFO", run_id,
                                  **common, round_avg_ms=1.0, round_max_ms=2.0,
                                  wait_avg_ms=0.1, wait_max_ms=0.2,
-                                 slowest_counts={str(k): 100//n for k in range(n)},
+                                 slowest_counts=block_counts,
                                  normal_rounds=90, full_rounds=10,
                                  normal_bytes=1000, full_bytes=2000))
+    most = max(total_counts.values())
     assigner.append(log_line("ASSIGNER", "TERMINATE", "SUCCESS", run_id,
                              rounds_completed=3000, elapsed_ms=3000.0,
                              throughput_round_s=1000.0, handlers_joined=n,
                              round_avg_ms=1.0, round_max_ms=2.0,
                              wait_avg_ms=0.1, wait_max_ms=0.2,
-                             slowest_counts={str(k): 3000//n for k in range(n)},
-                             slowest_workers=[0], normal_rounds=2700,
-                             full_rounds=300, normal_bytes=27000,
-                             full_bytes=6000, normal_avg_bytes=10.0,
-                             full_avg_bytes=20.0))
+                             slowest_counts=total_counts,
+                             slowest_workers=[k for k in range(n)
+                                              if total_counts[str(k)] == most],
+                             normal_rounds=2700, full_rounds=300,
+                             normal_bytes=30000, full_bytes=60000,
+                             normal_avg_bytes=30000/2700,
+                             full_avg_bytes=60000/300))
     (root / "logs" / "Assigner.txt").write_text("".join(assigner),
                                                    encoding="utf-8", newline="\n")
 
