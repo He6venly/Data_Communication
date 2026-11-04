@@ -1,6 +1,7 @@
 """한 원격 실행의 frame 301장으로 진행 GIF를 만든다."""
 
 import argparse
+import os
 from pathlib import Path
 import sys
 import tempfile
@@ -106,12 +107,11 @@ def make_gif(run_dir, output):
         images[0].save(temp_path, save_all=True, append_images=images[1:],
                        duration=durations, loop=0, optimize=False, disposal=2)
         validate_saved_gif(temp_path, images[0], images[-1])
-        temp_path.replace(output)
-    except BaseException:
+        # 검증된 파일을 대상이 없을 때만 공개한다.
+        os.link(temp_path, output)
+    finally:
         if temp_path is not None:
             temp_path.unlink(missing_ok=True)
-        raise
-    finally:
         for image in images:
             image.close()
     return []

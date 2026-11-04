@@ -3,7 +3,7 @@ import json
 import tempfile
 import unittest
 
-from tools.verify_run import verify_run_directory
+from tools.verify_run import validate_run_info, verify_run_directory
 from fixture import change_log, make_run
 
 
@@ -138,6 +138,42 @@ class VerifyRunTests(unittest.TestCase):
             checked, errors, _ = verify_run_directory(run)
             self.assertIsNone(checked["timeouts"])
             self.assertTrue(any("timeouts 형식" in error for error in errors))
+
+    def test_oversized_integer_timeout_returns_validation_error(self):
+        with tempfile.TemporaryDirectory() as name:
+            run = Path(name)
+            (run / "run_info.json").write_text(json.dumps({
+                "schema_version": 1, "run_id": "test-n1", "n": 1, "team": 2,
+                "n_mode": "fixed", "rounds": 3000, "width": 160, "height": 80,
+                "timezone": "KST",
+                "canvas_sha256": {f"canvas{i}.txt": "0" * 64 for i in range(3)},
+                "timeouts": {"startup_s": 300, "io_s": 10**310},
+            }), encoding="utf-8")
+            errors = []
+            checked = validate_run_info(run, errors)
+            self.assertIsNone(checked["timeouts"])
+            self.assertEqual(len(errors), 1)
+            self.assertIn("제한시간", errors[0])
+
+    def test_zero_traffic_and_noninteger_fields_are_rejected(self):
+        with tempfile.TemporaryDirectory() as name:
+            run = make_run(Path(name) / "run")
+            assigner = run / "logs" / "Assigner.txt"
+            for occurrence in range(30):
+                change_log(assigner, "BARRIER", {"normal_bytes": 0, "full_bytes": 0},
+                           occurrence=occurrence)
+            change_log(assigner, "TERMINATE", {
+                "normal_bytes": 0, "full_bytes": 0,
+                "normal_avg_bytes": 0, "full_avg_bytes": 0,
+            })
+            worker = run / "logs" / "Worker0.txt"
+            change_log(worker, "ASSIGN", {"k": False, "y0": False, "h": 80.0})
+            _, errors, _ = verify_run_directory(run)
+            for event in ("BARRIER", "TERMINATE"):
+                for field in ("normal_bytes", "full_bytes"):
+                    self.assertTrue(any(f"Assigner {event}: {field}" in error for error in errors))
+            for field in ("k", "y0", "h"):
+                self.assertTrue(any(f"Worker0 ASSIGN: {field} " in error for error in errors))
 
 
 if __name__ == "__main__":

@@ -20,9 +20,18 @@ def one_record(records, event, status, errors, label):
 
 
 # 로그 필드가 예상한 값과 같은지 항목별로 비교한다.
-def check_fields(fields, expected, errors, label):
+def check_fields(fields, expected, errors, label, *, numeric=False):
     for name, value in expected.items():
-        if fields.get(name) != value:
+        actual = fields.get(name)
+        if numeric:
+            correct_type = is_number(actual)
+        elif is_int(value):
+            correct_type = is_int(actual)
+        elif isinstance(value, list):
+            correct_type = isinstance(actual, list) and all(is_int(item) for item in actual)
+        else:
+            correct_type = True
+        if not correct_type or actual != value:
             errors.append(f"{label}: {name} 값이 {value!r}와 다릅니다")
 
 
@@ -41,6 +50,10 @@ def nonnegative_number(value):
 # 값이 bool이 아닌 음수 없는 정수인지 확인한다.
 def nonnegative_int(value):
     return is_int(value) and value >= 0
+
+
+def positive_byte_count(value):
+    return is_int(value) and value > 0 and is_number(value)
 
 
 # Worker별 최지연 횟수의 키, 정수 범위와 전체 합계를 검사한다.
@@ -86,8 +99,6 @@ def validate_run_info(run_dir, errors):
         return None
 
     checked = dict(info)
-    if info.get("schema_version") != 1:
-        errors.append("run_info.json: schema_version은 1이어야 합니다")
     run_id = info.get("run_id")
     if not isinstance(run_id, str) or RUN_ID_RE.fullmatch(run_id) is None:
         errors.append("run_info.json: run_id 형식이 잘못됐습니다")
@@ -104,7 +115,7 @@ def validate_run_info(run_dir, errors):
     if n_mode not in ("fixed", "random") or n == 1 and n_mode != "fixed":
         errors.append("run_info.json: n_mode가 n과 맞지 않습니다")
         checked["n_mode"] = None
-    check_fields(info, {"rounds": 3000, "width": 160, "height": 80,
+    check_fields(info, {"schema_version": 1, "rounds": 3000, "width": 160, "height": 80,
                         "timezone": "KST"}, errors, "run_info.json")
 
     hashes = info.get("canvas_sha256")
@@ -214,7 +225,7 @@ def validate_assigner_log(run_dir, info, frame_data, errors):
         if isinstance(timeouts, dict):
             check_fields(init["fields"], {"startup_timeout_s": timeouts["startup_s"],
                                           "io_timeout_s": timeouts["io_s"]},
-                         errors, "Assigner INIT")
+                         errors, "Assigner INIT", numeric=True)
         require_fields(init["fields"], ("host", "port"), errors, "Assigner INIT")
         if not is_int(init["fields"].get("port")) or not 1 <= init["fields"]["port"] <= 65535:
             errors.append("Assigner INIT: port는 1~65535 정수여야 합니다")
@@ -287,8 +298,8 @@ def validate_assigner_log(run_dir, info, frame_data, errors):
             barrier_values_valid = False
         for name in ("normal_bytes", "full_bytes"):
             value = fields.get(name)
-            if not nonnegative_int(value):
-                errors.append(f"Assigner BARRIER: {name}는 음수가 아닌 정수여야 합니다")
+            if not positive_byte_count(value):
+                errors.append(f"Assigner BARRIER: {name}는 유한한 양의 정수여야 합니다")
                 barrier_values_valid = False
             else:
                 barrier_totals[name] += value
@@ -302,11 +313,16 @@ def validate_assigner_log(run_dir, info, frame_data, errors):
 
     check_summary_ranges(records, "ROUND", errors, "Assigner.txt")
     check_summary_ranges(records, "BARRIER", errors, "Assigner.txt")
+    for record in event_records(records, "RESULT", "INFO"):
+        k = record["fields"].get("k")
+        if not is_int(k) or not 0 <= k < n:
+            errors.append("Assigner RESULT: Worker 번호가 잘못됐습니다")
     for k in range(n):
         check_summary_ranges(records, "RESULT", errors, "Assigner.txt", k)
 
     repaints = event_records(records, "REPAINT", "INFO")
-    if [record["fields"].get("round") for record in repaints] != [1000, 2000]:
+    repaint_rounds = [record["fields"].get("round") for record in repaints]
+    if not all(is_int(r) for r in repaint_rounds) or repaint_rounds != [1000, 2000]:
         errors.append("Assigner.txt: REPAINT는 1000, 2000 순서여야 합니다")
     elif [(record["fields"].get("canvas"), record["fields"].get("conversion"))
           for record in repaints] != [("canvas1.txt", "brian"),
@@ -331,8 +347,8 @@ def validate_assigner_log(run_dir, info, frame_data, errors):
                               3_000_000 / fields["elapsed_ms"], rel_tol=1e-9):
             errors.append("Assigner TERMINATE: 처리량이 총시간과 맞지 않습니다")
         for name in ("normal_bytes", "full_bytes"):
-            if not nonnegative_int(fields.get(name)):
-                errors.append(f"Assigner TERMINATE: {name}는 음수가 아닌 정수여야 합니다")
+            if not positive_byte_count(fields.get(name)):
+                errors.append(f"Assigner TERMINATE: {name}는 유한한 양의 정수여야 합니다")
         require_fields(fields, ("slowest_counts", "slowest_workers"),
                        errors, "Assigner TERMINATE")
         counts = validate_slowest_counts(fields.get("slowest_counts"), n, 3000,
@@ -366,12 +382,12 @@ def validate_assigner_log(run_dir, info, frame_data, errors):
                 if not is_number(fields.get(name)) or not math.isclose(fields[name], value,
                                                                        rel_tol=1e-9):
                     errors.append(f"Assigner TERMINATE: {name}가 BARRIER 통계와 다릅니다")
-        if (nonnegative_int(fields.get("normal_bytes"))
+        if (positive_byte_count(fields.get("normal_bytes"))
                 and nonnegative_number(fields.get("normal_avg_bytes"))
                 and not math.isclose(fields["normal_avg_bytes"],
                                      fields["normal_bytes"] / 2700, rel_tol=1e-9)):
             errors.append("Assigner TERMINATE: normal_avg_bytes 계산이 잘못됐습니다")
-        if (nonnegative_int(fields.get("full_bytes"))
+        if (positive_byte_count(fields.get("full_bytes"))
                 and nonnegative_number(fields.get("full_avg_bytes"))
                 and not math.isclose(fields["full_avg_bytes"],
                                      fields["full_bytes"] / 300, rel_tol=1e-9)):
@@ -400,7 +416,7 @@ def validate_worker_log(run_dir, info, k, errors):
         if isinstance(timeouts, dict):
             check_fields(fields, {"startup_timeout_s": timeouts["startup_s"],
                                   "io_timeout_s": timeouts["io_s"]},
-                         errors, f"Worker{k} INIT")
+                         errors, f"Worker{k} INIT", numeric=True)
     one_record(records, "CONNECT", "SUCCESS", errors, f"Worker{k}.txt")
     assign = one_record(records, "ASSIGN", "SUCCESS", errors, f"Worker{k}.txt")
     if assign:
@@ -411,13 +427,15 @@ def validate_worker_log(run_dir, info, k, errors):
     check_summary_ranges(records, "ROUND", errors, f"Worker{k}.txt", k)
     for record in event_records(records, "ROUND", "INFO"):
         fields = record["fields"]
+        check_fields(fields, {"k": k}, errors, f"Worker{k} ROUND")
         if (not nonnegative_number(fields.get("compute_avg_ms"))
                 or not nonnegative_number(fields.get("compute_max_ms"))):
             errors.append(f"Worker{k} ROUND: 계산시간은 음수가 아닌 수여야 합니다")
         elif fields["compute_avg_ms"] > fields["compute_max_ms"]:
             errors.append(f"Worker{k} ROUND: 평균 계산시간이 최대값보다 큽니다")
     repaints = event_records(records, "REPAINT", "INFO")
-    if [record["fields"].get("round") for record in repaints] != [1000, 2000]:
+    repaint_rounds = [record["fields"].get("round") for record in repaints]
+    if not all(is_int(r) for r in repaint_rounds) or repaint_rounds != [1000, 2000]:
         errors.append(f"Worker{k}.txt: REPAINT는 1000, 2000 순서여야 합니다")
     elif [(record["fields"].get("canvas"), record["fields"].get("conversion"))
           for record in repaints] != [("canvas1.txt", "brian"),

@@ -1,6 +1,7 @@
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from PIL import Image
 
@@ -9,6 +10,20 @@ from fixture import make_run
 
 
 class GifTests(unittest.TestCase):
+    def test_gif_does_not_replace_file_created_during_generation(self):
+        with tempfile.TemporaryDirectory() as name:
+            output = Path(name) / "result.gif"
+            original = b"another process's output"
+            image = Image.new("P", (1, 1))
+            with (patch("tools.make_gif.verify_run_directory", return_value=({"n": 4}, [], {})),
+                  patch("tools.make_gif.render_frames", return_value=([image], [80])),
+                  patch("tools.make_gif.validate_saved_gif",
+                        side_effect=lambda *_: output.write_bytes(original))):
+                with self.assertRaises(FileExistsError):
+                    make_gif(Path(name), output)
+            self.assertEqual(output.read_bytes(), original)
+            self.assertEqual(list(output.parent.iterdir()), [output])
+
     def test_gif_has_all_frames(self):
         with tempfile.TemporaryDirectory() as name:
             root = Path(name)

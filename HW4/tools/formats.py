@@ -34,8 +34,12 @@ def is_int(value):
 
 # 무한대와 NaN이 아닌 유한한 수인지 확인한다.
 def is_number(value):
-    return (isinstance(value, (int, float)) and not isinstance(value, bool)
-            and math.isfinite(value))
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
 
 
 # 바이트 데이터의 전체 SHA-256 값을 계산한다.
@@ -86,7 +90,7 @@ def load_json(path):
     try:
         with path.open(encoding="utf-8") as file:
             result = json.load(file, parse_constant=invalid_constant)
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+    except (OSError, ValueError) as exc:
         raise FormatError(f"{path}: JSON을 읽을 수 없습니다 ({exc})") from exc
     if not isinstance(result, dict):
         raise FormatError(f"{path}: JSON 최상위 값은 객체여야 합니다")
@@ -138,7 +142,7 @@ def read_log(path, expected_node=None):
         try:
             fields = json.loads(body, parse_constant=lambda value: (_ for _ in ()).throw(
                 FormatError(f"유효하지 않은 JSON 수: {value}")))
-        except (json.JSONDecodeError, FormatError) as exc:
+        except ValueError as exc:
             raise FormatError(f"{path}: {number}번째 JSON이 잘못됐습니다 ({exc})") from exc
         if not isinstance(fields, dict):
             raise FormatError(f"{path}: 로그 JSON은 객체여야 합니다")
