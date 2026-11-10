@@ -1,0 +1,17 @@
+# Local inputs and generated outputs stay outside the source repository.
+/HW5_student_kit/
+/run_*/
+/logs/
+/results/
+/output/
+/tmp/
+/compare_result.txt
+/AllDefinedLogs.txt
+/Readme.txt
+/download.txt
+*.pdf
+*.mp4
+*.zip
+*.class
+*.exe
+*.o
