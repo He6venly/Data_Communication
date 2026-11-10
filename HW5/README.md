@@ -1,6 +1,6 @@
 # HW5 - Card Duel League
 
-2026학년도 2학기 데이터통신 2조. 제출 마감은 **2026.11.23(월) 23:59**임.
+2026학년도 2학기 데이터통신 2조.
 
 현재는 자료 검토·개발 계획 수립 단계임. Server·Player·Crasher와 자체 테스트는 아직 구현하지 않았으며, 아래 소스 구조·명령·완료 기준은 개발 계약임. 제공 샘플의 PASS를 자체 구현의 PASS로 사용하지 않음.
 
@@ -17,13 +17,15 @@
 
 명세가 우선이며, 강의자료와 Q&A는 같은 규칙의 설명으로 사용함. 코드 편의 때문에 필수 조건을 바꾸지 않음. 충돌이 실제 동작·평가에 영향을 주는 경우 해당 절과 재현 예를 먼저 제시함.
 
-2026.11.10 제공 자료 검사 결과:
+제공 자료 검사 결과:
 
 - kit Python 소스 7개의 문법 검사 통과. 설정 3개는 각각 10줄, LF, BOM 없음 확인
 - 제공 `3_sample/run_A`, `run_B`, `run_D`에 Python `verify_league.py` 실행: 모두 45/45, 판 오류 0, overlap 0, results·standings MATCH, PASS
 - 샘플 A/B의 results hash `cfde2bce`, standings hash `c8a0c732` 일치. 샘플 D는 `c28d4996`, `2bccc0ee`
 - 제공 A/D에 `check_chaos.py` 실행: files 15/15, crash 5 + quit 2, `CHAOS D -> PASS`
 - 원본 Python `bot_test.py`: **0 PASS / 41 FAIL, SOME FAIL**. `mybots.py`가 TODO 템플릿이므로 예상된 미구현 결과임. 종료 코드 0도 통과를 의미하지 않음
+- 별도의 임시 독립 기준 계산을 메모리에서 공식 `bot_test.py`에 연결해 정답 41건 대조: **41 PASS / 0 FAIL, ALL PASS**. SEED 6·LCG 4·PRIZE 10·BOT 12·MATCH 7·LEAGUE 2건 모두 일치. kit 템플릿과 프로젝트 구현은 수정하지 않았으며 자체 프로그램의 구현 완료를 의미하지 않음
+- 독립 계산의 seed 2026 리그 결과·순위를 제공 샘플 A/B와 바이트 단위로 비교해 일치 확인. seed 7의 두 리그 hash도 정답과 일치
 - C/Java는 구성·함수 계약·빌드 및 도구 호출 경로 확인. C 컴파일·실행은 미검증이며, Java 런타임 확인은 응답을 얻지 못해 중단함. 언어 간 출력 일치는 배포 자료의 설명이며 이번 환경에서 실측 검증한 사실은 아님
 - 자체 bot·TEAM 상성·실제 TCP·원격 Run A~D·제출 비교표는 모두 미검증
 
@@ -102,6 +104,17 @@ TEAM 난수: LCG(seed_of("S:mid:k:TEAM")) 하나만 사용
 ```
 
 이름표의 숫자는 0을 붙이지 않은 10진수이며 공백 없음. 생성기는 경기마다 새로 만들고 테이블 번호·A/B 자리를 넣지 않음. Player의 S는 WELCOME에서 받음. RANDOM은 마지막 한 장일 때도 판마다 정확히 한 번 next() 호출함.
+
+### 고정 seed의 정답과 적용 범위
+
+| 샘플 설정(P9/P10=RANDOM)의 seed | results hash | standings hash | 독립 계산 대조 |
+| --- | --- | --- | --- |
+| 2026 | `cfde2bce` | `c8a0c732` | 정답·제공 A/B 파일과 일치 |
+| 7 | `f11a9a2e` | `ceb40a34` | bot_tests의 정답과 일치 |
+
+고정 seed는 상금 순서·RANDOM 카드·동일한 TEAM 알고리즘의 결과를 고정함. 상금·bot 선택에는 현재 시각이나 언어 기본 난수를 섞지 않으며, 호출 순서·호출 횟수·손패 정렬도 정의와 같아야 함.
+
+샘플 hash는 P9/P10이 RANDOM일 때의 정답임. 정식 설정은 자체 TEAM을 사용하므로 TEAM을 고정한 뒤 Run A/B의 results·standings가 각각 같아야 하며 샘플 hash와 같을 필요는 없음. C의 QUIT 전 경기 배치와 D의 실제 장애 대상·적용 시점은 실행 순서에 영향을 받아 리그 seed가 같아도 결과가 달라질 수 있음. Crasher seed는 장애 계획을 재현하며 OS 스케줄링·상태 보고 도착 순서까지 고정하지 않음. nonce·시각·테이블 배정이 포함된 match_log와 운영 로그는 A/B에서도 동일 hash를 요구하지 않음.
 
 Player bot 공개 계약은 kit와 같은 `seed_of(text)`, `LCG(seed).next()`, `prize_order(S, mid)`, `Bot(strategy, S, mid, k)` 및 `choose(prize,r)`, `play(prize,r,my_card,opp_card)`로 정함. `choose()`는 손패를 바꾸지 않고 REVEALS 뒤 `play()`에서 제거함. 손패는 항상 오름차순임.
 
@@ -295,19 +308,6 @@ python make_compare.py 2 "RESULTS/run_A" "RESULTS/run_B" "RESULTS/run_C" "RESULT
 `make_compare`는 같은 디렉터리의 verify·chaos를 호출하며 `TEAM 2`를 사용함. kit에는 Run C 샘플이 없어 제공 자료만으로 정식 4-Run 비교표를 만들 수 없음. A/B/D 샘플을 C로 바꾸거나 예제 PASS를 채워 제출하지 않음.
 
 verify는 Run D에서도 기본 14개 파일을 검사하므로 D의 15번째 Crasher 파일은 chaos로 별도 확인함. 검사 종료 코드만 보지 않고 `-> PASS`, `CHAOS D -> PASS`, 오류 출력·필수 파일을 함께 판정함. verify의 텍스트 읽기는 CRLF를 정규화할 수 있으므로 별도 바이트 검사로 LF·ASCII·마지막 LF·실제 파일 hash를 확인함. 제공 도구의 PASS는 원격 배포 사실·필수 Thread 구조·전체 로그·Run C 고장 처리까지 증명하지 않으므로 코드·로그·영상 검사도 수행함.
-
-## 일정 제안
-
-| 기간 | 작업 | 다음 단계 진입 조건 |
-| --- | --- | --- |
-| 11/10~11 | 자료 검토, 담당 확정, CLI·로그·소켓 소유권 계약 검토 | 각 담당의 동일 계약·kit 접근 확인 |
-| 11/12~14 | bot·무통신 리그, Server M=1, Player 검산, launcher·Crasher 대역 | bot ALL PASS, sample M=1 hash 일치 |
-| 11/15~17 | M=4 Lobby 통합, Run C·stale·부전패, TEAM 비교·고정 | A=B, 고장 4건·종료·독립 검산 확인 |
-| 11/18~20 | Run D 제어 통합, 복귀 경계·반복 seed·지표 | 반복 chaos PASS, 모든 자식 정상 종료 |
-| 11/21~22 | 원격 A~D, 결과 취합·실측 분석·5분 영상 | 공식 검사·필수 로그·비교표 통과 |
-| 11/23 | Readme.txt·AllDefinedLogs·링크·제출물 확인 | 23:59 이전 제출. ZIP 생성은 별도 요청 시 수행 |
-
-날짜는 작업 순서와 완충 시간을 위한 제안이며 완료 실적이 아님. 앞 단계 기준 미달이면 구현·원격 검증 시간을 우선 확보하고 실측·제출 확인 시간을 남김.
 
 ## 실측·분석과 최종 제출
 
