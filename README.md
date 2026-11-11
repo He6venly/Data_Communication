@@ -8,7 +8,7 @@
 | [HW1](HW1/README.md) | 분산 Key-Value 저장 시스템 | Python | 완료 |
 | [HW2](HW2/README.md) | Thread Pool 기반 실시간 좌석 예매 시스템 | Java | 완료 |
 | [HW3](HW3/Readme.txt) | Fault-Tolerant 협업 Worker Ring | Python | 완료 |
-| [HW4](HW4/README.md) | ASCII Evolution - N-Worker 협업 진화 | Python | 설계 확정·구현 전 |
+| [HW4](HW4/README.md) | ASCII Evolution - N-Worker 협업 진화 | Python | 완료 |
 | [HW5](HW5/README.md) | Card Duel League - 10-Player 동시 대전 리그 | Python | 담당·설계 확정, 구현 전 |
 
 각 과제의 설명과 실행 방법은 해당 과제 README를 참고하세요.
