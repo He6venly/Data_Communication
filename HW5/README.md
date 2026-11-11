@@ -1,108 +1,37 @@
-# HW5 - Card Duel League
+# HW5 Card Duel League
 
-2026학년도 2학기 데이터통신 2조.
+데이터통신 2조 개발 기준임. 담당, 공통 인터페이스, TEAM 전략을 확정함. 프로젝트 코드·원격 Run은 구현 및 검증 전임.
 
-현재는 자료 검토·개발 계획 수립 단계임. Server·Player·Crasher와 자체 테스트는 아직 구현하지 않았으며, 아래 소스 구조·명령·완료 기준은 개발 계약임. 제공 샘플의 PASS를 자체 구현의 PASS로 사용하지 않음.
+공식 기준은 `HW5description.pdf`임. `HW5explanation.pdf`는 세부 구현과 로그를, `HW5QnA.pdf`는 해석과 제출 구성을 확인할 때 사용함. 원본 설정과 정답은 `HW5_student_kit/`를 사용함.
 
-## 기준 자료와 확인 결과
+## 확정 담당
 
-| 구분 | 자료·확인 내용 |
+| 담당 | 브랜치와 소유 경로 | 구현 범위 | 단독 검증 |
+| --- | --- | --- | --- |
+| 안선효 | `hw5/server` · `src/server/` · `tests/server/` · `tests/integration/` | Server, Lobby·Table, 판정·점수, 결과 파일·실측 지표, 통합·원격 실행·최종 제출 취합 | 대역 Player 10개로 매칭, 정상·지연·위반·부전패, 파일 검사 |
+| 황대겸 | `hw5/player` · `src/player/` · `tests/player/` | Player, 표준 bot·TEAM, 검산·CONFIRM, Run C 고장, Run D 상태·제어 | kit bot 41건과 TEAM 기준 hash, 대역 Server·Crasher로 송신·침묵·복귀·종료 검사 |
+| 황왕석 | `hw5/crasher-tools` · `src/crasher/` · `tools/launch_players.py` · `tests/crasher/` · `tests/tools/` | Crasher C1~C8, 원본 설정으로 Player 10개를 띄우는 스크립트, 로그 취합과 kit 검증 지원 | 대역 Player 10개로 대상 선택·ACK·복귀 검사. launcher는 대역 실행 명령과 kit 설정으로 검사 |
+
+각 담당이 자기 브랜치에서 자기 경로와 필요한 대역을 관리함. Server·Player·Crasher는 자기 패키지와 Python 표준 라이브러리만 import함. 접점은 아래 TCP 메시지·CLI·파일·로그와 공식 설정임. 인터페이스 변경이 필요하면 명세 근거를 대조하고 관련 담당과 README를 먼저 맞춤. 통합 단계에서 실제 프로그램을 별도 프로세스로 실행함.
+
+## 구현 범위
+
+Python 3.12 이상과 표준 라이브러리를 사용함. 구현 대상은 Server, Player, Crasher와 Player 실행 스크립트 1개임. 패키지 안의 파일 분리는 각 담당이 필요한 만큼 정함. 검증은 제공 kit와 담당별 대역을 사용함.
+
+| 항목 | 과제 필수 조건 |
 | --- | --- |
-| 공식 요구사항 | `HW5description.pdf` 32쪽. 규칙·필수 구현·Run·검증·제출 기준 |
-| 상세 설명 | `HW5explanation.pdf` 179쪽. 난수·프로토콜·Lobby·장애·의사코드·필수 로그 |
-| 해석 보충 | `HW5QnA.pdf` 19쪽. 설정 원본 사용, 제출 구성, TEAM 제한, crash 복귀 범위 등 |
-| 제공 kit | `HW5_student_kit/` 76개 파일. README, bot 테스트, Python/C/Java 도구, 샘플 A/B/D, 설정 3종 |
-| 정리 지침 | 로컬 `제출물정리_AGENTS.md`와 작업 지침. 원본·사용자 변경 보존, 실제 실행 근거로만 완료 판정 |
-| 저장소 설정 | 기존 `.gitignore`의 Python 캐시·키 제외 규칙 유지. HW5 산출물 제외 규칙은 이 폴더에 한정 |
+| 배포·연결 | 원격 Server 1개, 로컬 PC 한 대의 Player 10개 독립 프로세스, Run D에서 같은 PC의 Crasher 1개. 게임은 Server–Player TCP Star, 제어는 Crasher–Player TCP |
+| 스레드·동기화 | Server Main 1 + START 직후 생성하는 Table M개. 공유 상태 Mutex 1개, 같은 Mutex에 연결한 `lobby_cv`·`done_cv` 두 개. 로그 Lock은 별도 |
+| 경기·점수 | P1~P10의 모든 쌍 45경기, 각 10판. 작은 번호가 A. 각 경기에서 카드와 상금은 각각 1~10. 큰 카드가 상금 획득, 동률이면 상금 소멸. 승 3·무 1·패 0. 순위는 PTS·득실차·득점 내림차순, 선수 번호 오름차순 |
+| 실행값 | 리그 seed 2026, COMMIT·REVEAL·CONFIRM 단계별 3,000ms, ROUND 수신 후 카드 선택 전에 18~22ms 균등 무작위 대기. M은 1~5 지원 |
+| 전략 배치 | P1/P2 RANDOM, P3/P4 MATCH, P5/P6 PLUS1, P7/P8 BIGSMALL, P9/P10 TEAM. 샘플 설정의 P9/P10은 RANDOM |
+| 판정 | SHA-256 Commit–Reveal. Player가 공개 hash·판정·누적 점수를 직접 계산해 CONFIRM 전송 |
+| 장애 | 명세의 가상 crash·quit. 프로세스와 TCP 연결은 BYE까지 유지 |
+| 제출 Run | A는 M=1, B/C/D는 M=4. A/B/D는 `players_std.txt`, C는 `players_fault.txt`. 샘플 검증은 `players_sample.txt` |
 
-명세가 우선이며, 강의자료와 Q&A는 같은 규칙의 설명으로 사용함. 코드 편의 때문에 필수 조건을 바꾸지 않음. 충돌이 실제 동작·평가에 영향을 주는 경우 해당 절과 재현 예를 먼저 제시함.
+팀 설계는 Server의 Main·Table만, Player의 게임 스레드와 Run D 제어 스레드 1개, Crasher의 제어 수신·사건 대기·복귀 예약으로 구성함. Crasher 공유 상태는 Mutex·Condition으로 처리함. 로그 시각은 KST, 경과 시간은 단조 시계로 측정함. 설정값은 실행 인자와 kit 설정으로 받음.
 
-제공 자료 검사 결과:
-
-- kit Python 소스 7개의 문법 검사 통과. 설정 3개는 각각 10줄, LF, BOM 없음 확인
-- 제공 `3_sample/run_A`, `run_B`, `run_D`에 Python `verify_league.py` 실행: 모두 45/45, 판 오류 0, overlap 0, results·standings MATCH, PASS
-- 샘플 A/B의 results hash `cfde2bce`, standings hash `c8a0c732` 일치. 샘플 D는 `c28d4996`, `2bccc0ee`
-- 제공 A/D에 `check_chaos.py` 실행: files 15/15, crash 5 + quit 2, `CHAOS D -> PASS`
-- 원본 Python `bot_test.py`: **0 PASS / 41 FAIL, SOME FAIL**. `mybots.py`가 TODO 템플릿이므로 예상된 미구현 결과임. 종료 코드 0도 통과를 의미하지 않음
-- 별도의 임시 독립 기준 계산을 메모리에서 공식 `bot_test.py`에 연결해 정답 41건 대조: **41 PASS / 0 FAIL, ALL PASS**. SEED 6·LCG 4·PRIZE 10·BOT 12·MATCH 7·LEAGUE 2건 모두 일치. kit 템플릿과 프로젝트 구현은 수정하지 않았으며 자체 프로그램의 구현 완료를 의미하지 않음
-- 독립 계산의 seed 2026 리그 결과·순위를 제공 샘플 A/B와 바이트 단위로 비교해 일치 확인. seed 7의 두 리그 hash도 정답과 일치
-- C/Java는 구성·함수 계약·빌드 및 도구 호출 경로 확인. C 컴파일·실행은 미검증이며, Java 런타임 확인은 응답을 얻지 못해 중단함. 언어 간 출력 일치는 배포 자료의 설명이며 이번 환경에서 실측 검증한 사실은 아님
-- TEAM의 최고 카드 보존 전략을 통신 없이 검증함. 표준 상대 4종에 대해 seed 1~1000과 별도 seed 1001~2000에서 양쪽 자리로 총 16,000경기를 비교함. 결과는 TEAM 절 참조
-- 프로젝트 Player에 연결한 bot·실제 TCP·원격 Run A~D·제출 비교표는 미검증
-
-## 필수 요구사항
-
-| 항목 | 고정 조건 |
-| --- | --- |
-| 프로그램·배포 | 외부 호스트의 League Server 1개, 로컬 PC 한 대의 Player 10개 독립 프로세스, Run D에서 같은 PC의 Crasher 1개 |
-| 연결 | 게임 TCP Star. Player 간 연결 없음. Crasher는 Player 제어 TCP에만 연결하며 Server와 통신하지 않음 |
-| Server 스레드 | Main 1 + START 직후 한 번 생성한 Table M개. 경기별·Player별 스레드 생성 금지 |
-| 동기화 | 공유 상태용 Mutex 1개 + 같은 Mutex를 사용하는 `lobby_cv`, `done_cv` 2개. 로그 전용 Lock은 별도로 허용 |
-| 경기 | P1~P10 모든 쌍 45경기, `mid=0..44`, 각 10판. A는 작은 번호, B는 큰 번호 |
-| 카드·점수 | 각자 카드 1~10 한 번씩. 더 큰 카드가 상금 획득, 동률이면 상금 소멸. 승 3·무 1·패 0 |
-| 순위 | PTS 내림차순 → GF-GA 내림차순 → GF 내림차순 → 번호 오름차순 |
-| 테이블·seed | `--tables` 1~5 지원. 제출은 A=1, B/C/D=4. 리그 seed=2026 |
-| 시간 | COMMIT·REVEAL·CONFIRM 단계별 공통 deadline 3,000ms. ROUND 수신 후 카드 선택 전 think 18~22ms 균등 무작위 |
-| 표준 전략 | P1/P2 RANDOM, P3/P4 MATCH, P5/P6 PLUS1, P7/P8 BIGSMALL, P9/P10 동일한 자체 TEAM |
-| 공개·검증 | SHA-256 Commit–Reveal. Player가 상대 hash·판정·점수를 검산하고 자기 점수로 CONFIRM |
-| 장애 | TCP 연결·프로세스를 유지하는 가상 crash·quit. 물리적 종료·재접속으로 대체하지 않음 |
-| 출력 | `run_X/RunX_*`, A/B/C 14개·D 15개. 결과 데이터는 ASCII·LF, 로그는 UTF-8·LF |
-| 정합성 | A~D 모두 verify PASS, A/B results·standings hash 각각 동일, D chaos PASS |
-
-정상 A/B에서 모든 Server RESULT가 `confirm=OK/OK`이고 Player의 VERIFY FAIL이 0건이어야 함. M=5 실행은 제출 요구가 아니지만 입력 범위는 지원함.
-
-## 설계 선택과 미확정 사항
-
-다음은 명세가 강제한 언어·경로가 아니라 이번 개발의 기본안임.
-
-- Python 3.12 이상·표준 라이브러리 사용. 제공 Python kit와 직접 연결 가능하고 TCP 대기가 주인 Server에 적합하므로 선택함
-- 각 프로그램은 자기 패키지 내부만 import함. 담당 간 런타임 의존을 줄이기 위해 공통 실행 패키지를 만들지 않고 TCP·CLI·파일·로그 계약을 공유함. 난수 공식은 Server·Player에서 각각 검사함
-- Server는 선택 Monitor 없이 Main+Table M만 사용함. Player는 게임 Main, Run D에서만 제어 수신 스레드 1개 추가함
-- Crasher는 제어 연결을 `selectors`로 읽는 수신 스레드 1개와 Main 사건 스케줄러를 기본안으로 사용함. Main은 CV의 기한 대기로 사건과 여러 restart 시점을 함께 관리하며 busy-wait하지 않음
-- 로그는 실제 KST 시각, 구간 측정은 `time.perf_counter()` 사용. 필수 message 앞부분을 그대로 유지하고 추가 정보는 뒤에 붙임
-- 기본 게임 포트 9500, 로컬 제어 포트 9700을 예시로 사용함. 호스트·포트·seed·테이블·timeout·Run·출력·전략·고장은 CLI/설정으로 받음
-- 원본 PDF·kit·키·실행 결과·영상·제출물은 Git 밖에 보관함. kit를 수정하지 않고 bot 테스트용 임시 사본·어댑터에서 자기 구현을 연결함
-
-P9/P10의 TEAM은 최고 카드 보존 전략으로 확정함. 선택 규칙과 자체 기준 hash는 아래 TEAM 절에 명시함.
-
-**미확정:** 아래 담당 배분은 HW4 역할을 참고한 제안임. 학번, 원격 서비스·인스턴스·OS·주소·접속 계정·실제 포트 가용성은 아직 확정·확인하지 않았음. 원격 환경값이 없어도 로컬 개발은 진행 가능함. 유료 자원 생성·변경은 이번 작업 범위에 포함하지 않음.
-
-## 담당별 작업 계획
-
-| 담당 제안 | 소유 경로·브랜치 | 작업·독립 완료 기준 |
-| --- | --- | --- |
-| 안선효 | `src/server/`, `tests/server/`, `tests/integration/` / `hw5/server` | Main·Table Pool·Lobby·판정·deadline·stale·QUIT·부전패·파일·지표. 대역 Player로 정상/위반/지연 검증 후 실제 통합·원격 배포·최종 취합 |
-| 황대겸 | `src/player/`, `tests/player/` / `hw5/player` | 결정적 난수·표준 bot·TEAM·독립 검산·Run C 고장·Run D 제어 상태. bot 41건 ALL PASS, 상성 측정, 대역 Server/Crasher로 송신 차단·복귀·BYE 검증 |
-| 황왕석 | `src/crasher/`, `tools/`, `tests/crasher/`, `tests/tools/` / `hw5/crasher-tools` | C1~C8·제어 TCP·로그, 설정 기반 Player launcher, kit 실행 어댑터·검증·비교 취합. 대역 Player로 지연 ACK·명령 대기·복수 restart·종료 검증 |
-
-위 인원 배정은 제안이며, 아래 범위로 개발과 검증을 병행할 수 있음. 각 담당이 자기 테스트 경로에 필요한 대역·검사 데이터를 둠.
-
-| 범위 | 외부 접점 | 단독 검증에 쓰는 대역·데이터 |
-| --- | --- | --- |
-| Server | 게임 TCP와 Run 출력 파일 | `tests/server/`의 대역 Player 10개로 접속, 매칭, 경기 판정, 타임아웃, 출력 검사. 기대 결과는 공식 kit와 기준 데이터로 대조 |
-| Player | 게임 TCP와 Run D 제어 TCP | `tests/player/`의 대역 Server와 대역 Crasher로 게임과 제어 상태 검사. bot 계산은 공식 kit와 TEAM 기준 hash로 검증 |
-| Crasher | Run D 제어 TCP와 장애 로그 | `tests/crasher/`의 대역 Player 10개가 상태와 ACK를 보내도록 구성해 주입·복귀·종료 검사 |
-| 도구 | 설정 파일, subprocess 실행 명령, Run 출력 파일 | `tests/tools/`에서 launcher는 대역 실행 명령, 검증은 제공 샘플과 임시 입력, bot 검사 연결은 테스트용 어댑터로 검사 |
-
-Server·Player·Crasher의 실행 코드는 자기 패키지와 표준 라이브러리만 사용함. 도구는 CLI나 파일로 연결함. 팀에서 공유할 기준은 아래 TCP 메시지, 실행 인자, 파일명·로그, 공식 kit 설정임. 세 프로그램을 모두 실행하는 검증은 `tests/integration/`에서 각 프로그램을 별도 프로세스로 띄워 수행함.
-
-예정 구조이며 빈 코드·빈 테스트 파일을 선생성하지 않음:
-
-```text
-HW5/
-├─ README.md
-├─ .gitignore
-├─ src/
-│  ├─ server/          __main__, lobby, match, transport, storage, metrics, log
-│  ├─ player/          __main__, bots, team, transport, control, verify, log
-│  └─ crasher/         __main__, control, scheduler, log
-├─ tools/             launch_players, check_bots, verify_runs
-└─ tests/             server, player, crasher, tools, integration
-```
-
-패키지 내부 파일 분리는 담당자가 결정함. 작업 디렉터리는 저장소의 `HW5/`, 실행 진입점은 `python -m src.server`, `python -m src.player`, `python -m src.crasher`, `python -m tools.launch_players`로 정함. `src`는 초기화 부작용 없는 namespace package로 사용함.
-
-## 공통 계산·Bot 계약
+## 공통 계산과 bot
 
 ```text
 pairs = [(a,b) for a in 1..10 for b in a+1..10]
@@ -124,11 +53,9 @@ TEAM 난수를 쓸 경우: LCG(seed_of("S:mid:k:TEAM")) 하나만 사용
 | 2026 | `cfde2bce` | `c8a0c732` | 정답·제공 A/B 파일과 일치 |
 | 7 | `f11a9a2e` | `ceb40a34` | bot_tests의 정답과 일치 |
 
-고정 seed는 상금 순서·RANDOM 카드·동일한 TEAM 알고리즘의 결과를 고정함. 상금·bot 선택에는 현재 시각이나 언어 기본 난수를 섞지 않으며, 호출 순서·호출 횟수·손패 정렬도 정의와 같아야 함.
+상금·RANDOM의 시드는 경기 순서나 테이블 배정과 독립적임. A/B에서 같은 두 파일은 results·standings임. C/D의 장애 결과는 적용 순서에 따라 달라질 수 있음.
 
-샘플 hash는 P9/P10이 RANDOM일 때의 정답임. 정식 설정은 자체 TEAM을 사용하므로 TEAM을 고정한 뒤 Run A/B의 results·standings가 각각 같아야 하며 샘플 hash와 같을 필요는 없음. C의 QUIT 전 경기 배치와 D의 실제 장애 대상·적용 시점은 실행 순서에 영향을 받아 리그 seed가 같아도 결과가 달라질 수 있음. Crasher seed는 장애 계획을 재현하며 OS 스케줄링·상태 보고 도착 순서까지 고정하지 않음. nonce·시각·테이블 배정이 포함된 match_log와 운영 로그는 A/B에서도 동일 hash를 요구하지 않음.
-
-Player bot 공개 계약은 kit와 같은 `seed_of(text)`, `LCG(seed).next()`, `prize_order(S, mid)`, `Bot(strategy, S, mid, k)` 및 `choose(prize,r)`, `play(prize,r,my_card,opp_card)`로 정함. `choose()`는 손패를 바꾸지 않고 REVEALS 뒤 `play()`에서 제거함. 손패는 항상 오름차순임.
+Player bot의 kit 연결 규격은 kit와 같은 `seed_of(text)`, `LCG(seed).next()`, `prize_order(S, mid)`, `Bot(strategy, S, mid, k)` 및 `choose(prize,r)`, `play(prize,r,my_card,opp_card)`로 정함. `choose()`는 손패를 바꾸지 않고 REVEALS 뒤 `play()`에서 제거함. 손패는 항상 오름차순임.
 
 | 전략 | 선택 규칙 |
 | --- | --- |
@@ -137,7 +64,7 @@ Player bot 공개 계약은 kit와 같은 `seed_of(text)`, `LCG(seed).next()`, `
 | BIGSMALL | 상금≥6이면 손패 최대, 그 외 최소 |
 | TEAM | 남은 최고 상금에 손패의 최고 카드를 사용하고, 그 전에는 다른 카드로 승부 |
 
-TEAM 함수는 `team_choose(p,r,hand,history,prizes_left,rng)`로 제한함. history는 `(r,p,내 카드,공개된 상대 카드)`이며 상대 번호·전략·자리·mid·k·S를 전달하지 않음. S/mid/k는 난수 생성기 이름표 구성에만 사용함. 다른 경기·순위·현재 시각·파일·네트워크 정보도 선택 근거로 사용하지 않음.
+TEAM 함수는 `team_choose(p,r,hand,history,prizes_left,rng)`로 제한함. history는 `(r,p,내 카드,공개된 상대 카드)`이며 상대 번호·전략·자리·mid·k·S를 전달하지 않음. TEAM 선택 입력은 이번 경기 상태로 한정함. S/mid/k는 난수를 사용하는 전략의 이름표 구성에만 사용함.
 
 ### TEAM 최고 카드 보존
 
@@ -158,9 +85,7 @@ kit 방식대로 `mid=seed%45`를 사용했으며, 범위별로 상대마다 A/B
 | PLUS1 | 1662 / 10 / 328 | 83.1% | 1684 / 10 / 306 | 84.2% |
 | BIGSMALL | 1722 / 42 / 236 | 86.1% | 1702 / 34 / 264 | 85.1% |
 
-남은 상금의 순위로 카드 순위를 정하는 방식과 최근 3판의 공개 카드로 다음 카드를 추정하는 방식도 비교함. 최고 카드 보존은 선택 규칙 세 줄로 설명할 수 있고, 두 seed 범위에서 표준 상대별 승률이 72.9~86.1%로 고르게 나와 TEAM으로 확정함.
-
-공식 표준 bot 41건 ALL PASS. seed 2026의 정식 전략 구성에서 통신 없이 45경기를 정순·역순으로 실행해 경기별 결과가 일치함. 자체 기준 hash는 results `5255a2bf`, standings `6a4147b7`임. G44의 TEAM 대 TEAM은 `0:0 DRAW`였음. 프로젝트 Player 연결과 실제 TCP 실행은 미검증.
+seed 2026의 정식 전략 구성에서 통신 없이 45경기를 정순·역순으로 실행해 경기별 결과가 일치함. 자체 기준 hash는 results `5255a2bf`, standings `6a4147b7`임. G44의 TEAM 대 TEAM은 `0:0 DRAW`였음.
 
 ## TCP·단계별 처리 계약
 
@@ -184,7 +109,7 @@ kit 방식대로 `mid=seed%45`를 사용했으며, 범위별로 상대마다 A/B
 
 Server는 두 COMMIT 수신 후 COMMITS, 두 REVEAL 검사 후 REVEALS를 보냄. REVEAL 검사 순서는 **칸 수·카드 정수 → hash 일치 → 손패 포함**임. 첫 사유 하나만 적용하며 hash 길이·nonce 길이를 별도 BAD_MSG 사유로 추가하지 않음. COMMIT은 칸 수 4개, REVEAL은 5개임. 종류·mid·r이 다른 줄은 STALE로 버리고 같은 deadline으로 계속 기다림. REJOIN은 로그만 남김.
 
-두 선수는 단계마다 같은 절대 deadline을 사용함. A 대기 때문에 B의 마감을 새로 3초 늘리지 않음. A 대기 후 시간이 끝나도 B 소켓에 이미 수신된 완성 줄을 확인함. 이 경계는 B가 먼저 보낸 뒤 A가 침묵하는 대역 검사로 확인함. CONFIRM 지연·불일치는 `NO`·`DISPUTE` 기록만 남기며 점수는 변경하지 않음. DEAD 또는 CONFIRM 대신 QUIT은 `-`임.
+ROUND·COMMITS·MATCH_END를 두 선수에게 각각 송신한 뒤 단계마다 같은 절대 deadline을 적용함. 먼저 받은 정상 응답은 상대가 침묵해도 인정함. 마감 시 양쪽 수신 버퍼의 완성 줄을 확인하고 늦은 줄은 STALE로 처리함. CONFIRM은 일치 `OK`, 지연 `NO`, 불일치 `DISPUTE`, DEAD 또는 QUIT `-`로 기록함. QUIT은 이후 DEAD로 처리하고 해당 경기 점수는 유지함.
 
 Player는 상대 COMMIT hash와 공개 카드·nonce를 비교하고 판 winner·누적 점수를 직접 계산함. MATCH_END 점수를 복사하지 않음. 몰수는 FORFEIT의 who로 자체 기록 점수를 결정함.
 
@@ -227,24 +152,24 @@ Run C hash·P8 부전패 개수·최종 전적은 매칭 순서에 따라 달라
 
 제어 메시지는 `CTRL Pk`, `STATE Pk PLAYING mid`, `STATE Pk IDLE`, `STATE Pk CRASHED mid`, `STATE Pk QUIT`, `STATE Pk END`와 반대 방향 `CRASH`·`RESTART`·`QUIT`임. Player는 WELCOME 뒤 Crasher에 접속함. Crasher를 Player보다 먼저 기동함.
 
-- C1: Player 10개의 CTRL 접속 대기. seed 생략 시 무작위이며 사용한 seed와 계획을 첫 PLAN에 기록
-- C2: 장애 4~7건·quit 1~2건·나머지 crash, 종류 순서 무작위
-- C3: 발생 기준은 종료 경기 수 근사값 2~30에서 무작위 계획. PLAYING→IDLE 횟수÷2로 추적하고 리그 종료 시 대기 중단. 계획한 사건이 리그 전에 모두 발생했는지도 확인
-- C4: 현재 PLAYING이며 본인·상대가 장애 중이 아닌 선수 중 무작위 선택. crash·영구 quit·아직 적용되지 않은 명령 대기까지 장애 집합에 포함
-- C5: 대상 선택 후 0~0.3초 대기, 송신 직전 Lock 안에서 같은 경기·자격 재검사. 바뀌면 다시 선택
-- C6: `STATE CRASHED` ACK 수신부터 4~5초 뒤 RESTART. 여러 crash의 복귀를 독립 예약하며 IDLE 확인 후 장애 집합에서 제거
-- C7: quit은 영구 장애로 유지하고 재선택하지 않음
-- C8: 모든 Player의 END 확인 후 요약·TERMINATE. 종료 판정용 END/QUIT과 실제 프로세스 종료용 END를 구분함
+- C1. Player 10개의 CTRL 접속 대기. seed 생략 시 무작위이며 사용한 seed와 계획을 로그 첫 PLAN에 기록
+- C2. 장애 4~7건·quit 1~2건·나머지 crash, 종류 순서 무작위
+- C3. 발생 기준은 종료 경기 수 근사값 2~30에서 무작위로 정함. PLAYING→IDLE 횟수÷2로 추적하고 전원이 END 또는 QUIT이면 사건 주입 대기를 끝냄
+- C4. 현재 PLAYING이며 본인·상대가 장애 중이 아닌 선수 중 무작위 선택. crash·영구 quit·아직 적용되지 않은 명령 대기까지 장애 집합에 포함
+- C5. 대상 선택 후 0~0.3초 대기, 송신 직전 Lock 안에서 같은 경기·자격 재검사. 바뀌면 다시 선택
+- C6. `STATE Pk CRASHED mid` ACK 수신부터 무작위 4~5초 뒤 RESTART. 여러 crash의 복귀를 독립 예약하며 IDLE 확인 후 장애 집합에서 제거
+- C7. quit은 영구 장애로 유지하고 재선택하지 않음
+- C8. 모든 Player의 END 확인 후 요약·TERMINATE. 종료 판정용 END/QUIT과 실제 프로세스 종료용 END를 구분함
 
 Player는 MATCH에서 PLAYING 보고 후 대기 명령을 적용함. IDLE 중 받은 CRASH/QUIT은 INFO 기록 후 다음 MATCH에서 실행하며, 실제 적용에만 WARN을 한 번 기록함. 게임 송신 직전 mode 검사와 송신을 같은 Player 상태 Lock 안에서 수행하여 think 중 crash 뒤 COMMIT이 새지 않게 함. 이 Lock은 Server의 공유 상태 Lock과 다른 로컬 Lock임.
 
-CRASHED·QUIT 상태에서도 게임 소켓을 읽어 BYE 외 줄은 버림. RESTART 시 이미 쌓인 사용자·소켓 수신 데이터를 비우고 REJOIN·STATE IDLE을 보낸 뒤 **새 MATCH부터** Bot을 생성함. crash 중 버린 MATCH의 경기는 복귀 시점이 마감 전이어도 이어서 참여하지 않음. Server는 REJOIN으로 마감·Bot·점수를 초기화하지 않음.
+CRASHED·QUIT 상태에서도 게임 소켓을 읽어 BYE 외 줄은 버림. RESTART 시 이미 쌓인 사용자·소켓 수신 데이터를 비우고 REJOIN·STATE IDLE을 보낸 뒤 **새 MATCH부터** Bot을 생성함. crash 중 버린 MATCH의 경기는 복귀 시점이 마감 전이어도 새 MATCH가 올 때까지 무시함. Server는 REJOIN을 기록하고 기존 단계의 마감까지 대기함.
 
 QUIT은 게임 소켓으로 `QUIT mid`를 보내고 BYE까지 유지함. BYE 시 QUIT 선수도 `STATE END`와 TERMINATE를 남김. 마지막 경기 crash·리그 종료 중 restart·제어 EOF를 검사해 제어 스레드/타이머가 종료를 막지 않게 함. 일정상 두 장애 선수가 만나는 경기는 FORFEIT_BOTH 규칙으로 처리함.
 
 ## 파일·필수 로그
 
-결과 파일 3개는 ASCII·LF·마지막 LF, hash8은 **실제 파일 전체 바이트 SHA-256의 앞 8자리 소문자**임. Windows의 CRLF 자동 변환을 피하도록 `newline="\n"` 또는 바이너리 저장 사용함.
+Run 폴더의 모든 출력은 ASCII·LF로 저장하고 마지막 줄도 LF로 끝냄. hash8은 **실제 파일 전체 바이트 SHA-256의 앞 8자리 소문자**임. Windows의 CRLF 자동 변환을 피하도록 `newline="\n"` 또는 바이너리 저장 사용함.
 
 ```text
 RunX_results.txt      45줄, mid 오름차순: 18 P3 P5 10:45 WIN_B
@@ -257,9 +182,9 @@ F 18 r who reason
 END 18 outcome sA:sB t=7.539
 ```
 
-위 숫자는 형식 예이며 실측 결과가 아님. match_log는 경기 mid순, R은 판순, F는 몰수 시에만 기록함. 시각 t는 START 이후 같은 Server 단조 시계의 초임. 동시 경기 경계를 소수 3자리로 반올림해 overlap이 생기지 않도록 충분한 정밀도로 저장하고 실제 구간으로 검사함. nonce·hash는 축약하지 않음.
+match_log는 경기 mid순, R은 판순, F는 몰수 시에만 기록함. t는 START 이후 같은 Server 단조 시계의 초임. nonce 16자리와 hash 64자리를 그대로 기록함.
 
-공통 로그 외형은 `[HH:MM:SS.mmm] NODE | EVENT | STATUS | message`임. NODE는 SERVER/Pk/CRASHER, STATUS는 SUCCESS/FAIL/INFO/WARN. 필수 앞부분을 JSON으로 대체하지 않음.
+공통 로그 외형은 `[HH:MM:SS.mmm] NODE | EVENT | STATUS | message`임. NODE는 SERVER/Pk/CRASHER, STATUS는 SUCCESS/FAIL/INFO/WARN. 고정 앞부분 뒤에 필요한 값만 붙임.
 
 | 노드·EVENT·STATUS | message 고정 앞부분 |
 | --- | --- |
@@ -283,24 +208,9 @@ END 18 outcome sA:sB t=7.539
 
 SERVER의 INIT·CONNECT·START·TABLE·TERMINATE, Player의 CONNECT·MATCH·RESULT·FORFEIT·FAULT·VERIFY 등 실제 사용하는 모든 EVENT도 기록·정의함. Run C quit은 Player `FAULT WARN`, Run D quit은 `QUIT WARN`임. 장애 전 마지막 ROUND 번호가 없으면 r=0, 마지막 송신 종류가 없으면 last=-임. 종료한 Player의 TERMINATE는 마지막 줄로 유지함.
 
-## 실행·검증 계획
+## 실행과 검증
 
-### 환경과 원본 경로
-
-`HW5_KIT_DIR`은 각 PC의 배포 원본 루트로 지정함. 필수 자료가 없으면 해당 검사는 실패·미검증으로 보고하고 skip을 PASS로 계산하지 않음. 아래는 현재 로컬 배치에서 저장소 `HW5/`를 작업 디렉터리로 쓰는 PowerShell 예임.
-
-```powershell
-$env:PYTHONUTF8 = "1"
-$env:HW5_KIT_DIR = (Resolve-Path "../../HW5_student_kit").Path
-$env:HW5_RESULTS_DIR = [IO.Path]::GetFullPath("../../실행결과")
-python --version
-```
-
-Linux/macOS에서는 같은 환경변수를 `export`로 지정하고 `python3`를 사용함. 개인 절대 경로·접속 키·주소를 소스에 넣지 않음. `python` 명령은 실제 설치된 Python 3.12 이상으로 연결해야 함. 이번 자료 검사에는 번들 Python을 사용했으며 현재 PC의 기본 `python` 명령은 사용 가능 여부를 별도 확인해야 함.
-
-### 구현 후 CLI 계약
-
-다음 명령은 **현재 실행 가능한 코드가 아니라 구현할 진입점과 인자**임. `SERVER_IP`, `RESULTS`, `KIT`, `LOCAL_LOGS`는 실제 경로·환경값으로 치환함.
+개발 실행은 저장소 `HW5/`에서 함. 아래 명령은 구현할 진입점임. `SERVER_IP`·`KIT`·`RESULTS`·`LOCAL_LOGS`는 실제 값으로 바꿈.
 
 ```text
 python -m src.server --host 0.0.0.0 --port 9500 --seed 2026 --tables 1 --timeout 3000 --run A --out "RESULTS/run_A"
@@ -311,23 +221,14 @@ python -m src.crasher --host 127.0.0.1 --port 9700 --run D --out "LOCAL_LOGS/run
 python -m tools.launch_players --host SERVER_IP --port 9500 --config "KIT/4_config/players_std.txt" --think 18,22 --run D --out "LOCAL_LOGS/run_D" --crasher 127.0.0.1:9700
 ```
 
-Server는 B/C/D에서 `--tables 4`·해당 Run·출력 경로로 변경함. C launcher는 `players_fault.txt`의 고장 열을 각 Player의 `--fault 종류@mid,r`에 전달함. D는 Server·Crasher·Player 순으로 기동함. launcher는 설정의 P1~P10 중복·누락·전략·고장 형식을 검사하고 `sys.executable`로 독립 프로세스 10개를 실행함. 자식 실패·사용자 중단 시 자식들을 정리하고 실패를 반환함. 정상 실행 도중 Player를 종료하는 동작을 장애 주입으로 사용하지 않음.
+B/C/D는 Server의 `--tables 4`와 해당 Run·경로를 지정함. launcher는 kit의 `번호 전략 [고장]`을 읽어 Player 10개를 독립 프로세스로 실행하고, C의 고장 열을 `--fault 종류@mid,r`로 전달함. D는 Server·Crasher·Player 순으로 기동함. Run마다 새 폴더를 사용하고 Server·Player·Crasher 출력을 같은 Run 폴더에 모음.
 
-Run별로 새 출력 폴더를 사용하고 이전 결과를 조용히 덮어쓰지 않음. Server의 4개 파일과 로컬 Player 10개 로그, D의 Crasher 로그를 같은 Run끼리 모음. 경로는 공백·한글을 지원함.
+1. 각 담당이 대역 검사와 kit로 자신의 프로그램을 확인함. bot 테스트는 kit 임시 사본의 mybots 어댑터로 `src.player.bots`를 연결함. 표준 41건 ALL PASS와 샘플·TEAM 기준 hash를 확인함.
+2. 실제 TCP를 로컬에서 샘플 설정으로 M=1·2·4에서 확인함. results `cfde2bce`·standings `c8a0c732`, overlap 0이 기준임. 정식 설정 A/B는 파일 바이트와 자체 기준 `5255a2bf`·`6a4147b7`을 대조함.
+3. 로컬 C에서 고장 4건의 판·사유·점수와 QUIT 이후 부전패를 확인함. D는 seed를 바꿔 실행하고 Crasher 사건과 영향을 대조함.
+4. 제출용 A~D는 원격 Server와 로컬 Player·Crasher에서 실행함. 각 Run은 45경기·판 오류 0·overlap 0·verify PASS, A/B는 results·standings 동일·정상 CONFIRM `OK/OK`·VERIFY FAIL 0건, D는 chaos PASS가 기준임. 끝까지 참여한 Player의 TERMINATE 순위·승점·W/D/L을 standings와 대조함.
 
-### 검사 순서와 완료 기준
-
-1. 임시 kit 사본의 mybots 어댑터에 `src.player.bots` 연결 → 공식 41건 ALL PASS → 통신 없는 샘플 45경기 hash 일치. seed 7의 league hash `f11a9a2e`·`ceb40a34`도 확인
-2. 대역 Server/Player로 부분 수신·여러 줄 수신·중복 id·단계 순서·확정 전 REVEAL 금지·자체 CONFIRM 검산 확인
-3. 로컬 실제 TCP를 sample 설정 M=1, M=2, M=4로 실행 → results `cfde2bce`·standings `c8a0c732`, verify overlap 0 확인. M=5는 지원 범위 검사
-4. 확정 TEAM을 사용한 정식 A/B의 두 결과 파일을 바이트·hash로 비교하고, 자체 기준 results `5255a2bf`·standings `6a4147b7`과 대조. 정상 CONFIRM 전부 OK/OK, VERIFY FAIL 0건 확인
-5. Run C 고장 4건의 선수·판·사유·점수, 늦은 COMMIT 폐기, QUIT 이후 경기·마지막 BYE 확인. 두 위반·CONFIRM QUIT·DEAD+침묵·잘못된 카드/hash 검사 우선순위도 대역으로 확인
-6. 대역 Player로 Crasher의 C1~C8·ACK 기준 4~5초·명령 대기·상대 장애 제외·여러 crash 복귀·모든 END 종료 확인. 실제 D를 여러 seed로 반복해 매번 chaos PASS 확인
-7. 외부 Server+로컬 Player 구성으로 정식 A/B/C/D 새 실행 → 로그 취합 → 공식 검사·실측·영상·제출 문서 작성
-
-예정 자체 검사 명령은 `python -m unittest discover -s tests/담당경로 -p "test_*.py" -v`임. 현재 테스트 파일은 없음. 테스트 0건·필수 skip·대역만의 PASS를 실제 통합 PASS로 보고하지 않음. 도구의 정상 fixture뿐 아니라 파일 누락·CRLF·hash 손상·잘못된 로그·비정상 자식 종료가 실패로 잡히는지도 검사함.
-
-아래는 **제공 kit의 현재 사용 가능한 명령**임. kit의 `2_tools/python/`에서 실행하며 경로는 실제 절대 경로로 치환함. 마지막 명령은 작업 디렉터리에 파일을 생성하므로 원본 보존을 위해 세 도구를 임시 작업 폴더에 함께 복사하고 그 폴더에서 실행함.
+제공 `2_tools/python/`의 세 파일을 같은 작업 폴더에 두고 실행함. 아래 RESULTS는 Run 폴더가 모인 실제 경로임.
 
 ```text
 python verify_league.py "RESULTS/run_A"
@@ -338,9 +239,7 @@ python check_chaos.py "RESULTS/run_A" "RESULTS/run_D"
 python make_compare.py 2 "RESULTS/run_A" "RESULTS/run_B" "RESULTS/run_C" "RESULTS/run_D"
 ```
 
-`make_compare`는 같은 디렉터리의 verify·chaos를 호출하며 `TEAM 2`를 사용함. kit에는 Run C 샘플이 없어 제공 자료만으로 정식 4-Run 비교표를 만들 수 없음. A/B/D 샘플을 C로 바꾸거나 예제 PASS를 채워 제출하지 않음.
-
-verify는 Run D에서도 기본 14개 파일을 검사하므로 D의 15번째 Crasher 파일은 chaos로 별도 확인함. 검사 종료 코드만 보지 않고 `-> PASS`, `CHAOS D -> PASS`, 오류 출력·필수 파일을 함께 판정함. verify의 텍스트 읽기는 CRLF를 정규화할 수 있으므로 별도 바이트 검사로 LF·ASCII·마지막 LF·실제 파일 hash를 확인함. 제공 도구의 PASS는 원격 배포 사실·필수 Thread 구조·전체 로그·Run C 고장 처리까지 증명하지 않으므로 코드·로그·영상 검사도 수행함.
+A/B/C는 파일 14개, D는 Crasher 로그까지 15개임. verify는 D에서도 기본 14개를 검사하므로 chaos의 15개 검사까지 확인함. 출력의 PASS와 실제 파일의 LF·hash를 함께 대조함. 이전 확인 범위는 제공 A/B/D의 verify·A/D의 chaos, 독립 기준 계산의 bot 41건과 샘플 hash, TEAM 오프라인 실측임.
 
 ## 실측·분석과 최종 제출
 
@@ -353,7 +252,7 @@ Server 최종 로그와 제출 Readme에 다음을 실제 측정값으로 기록
 - A/B 시간 비·하한·tail·유휴 테이블, 로컬/원격 지연과 think를 뺀 나머지 지연, TEAM 상성·강약 분석
 - D의 사건 목록·crash/quit 수·복귀 간격·영향 경기. `(D 총시간-B 총시간)/crash 수`는 quit·매칭 변화가 섞인 비교 평균으로 표시하고 순수 crash 인과 효과로 단정하지 않음
 
-제출 목표 구성은 Q&A Q5·Q8의 예를 따름. 원본 설정 3종은 kit를 그대로 참조하고 ZIP에 별도로 넣지 않음. 따라서 실행 방법에 kit 준비·경로 지정이 반드시 포함되어야 함.
+제출 구성은 Q&A Q5·Q8을 따름. 실행 시 kit의 원본 설정을 경로로 지정함. 설정 파일은 ZIP 밖의 kit에 둠.
 
 ```text
 G2HW5.zip
@@ -368,10 +267,10 @@ G2HW5.zip
 └─ Readme.txt
 ```
 
-저장소의 `src/`, `tools/`를 제출 `src/` 아래에 함께 두어 패키지 경로를 보존하고 실행 작업 디렉터리를 명시함. 개발 README는 제출 Readme.txt와 구분하며, 최종 문서는 실제 코드·명령·결과 기준으로 작성함. 계획·대화 흔적·내부 절대 경로·미검증 성공 문구를 제출 문서에 넣지 않음.
+제출 `src/` 아래에 저장소의 `src/`와 `tools/launch_players.py`를 같은 상대 경로로 넣음. 압축을 푼 뒤 제출 `src/`에서 위 실행 명령을 사용함. 제출 문서는 실제 코드·명령·실측값을 기준으로 작성함.
 
 제출 Readme.txt에는 이름·학번·역할, 서비스·인스턴스·OS·시간대, 설치·실행·kit 준비, 구조·메시지·Thread/Lock/CV, timeout·stale·부전패, TEAM 규칙·의도·상성표, 지표·정합성·Run D 분석, 한계·느낀 점을 포함함. AllDefinedLogs.txt는 실제 사용하는 모든 EVENT·STATUS·필드·단위를 정의함.
 
-약 5분 `G2HW5.mp4`에는 원격 시작·10명 접속·4테이블 동시 진행·Run C 몰수/부전패·Run D crash/복귀/quit과 Crasher/Server 로그·verify/chaos/compare 확인을 포함함. download.txt의 링크를 비로그인 다운로드·재생으로 확인함. ZIP을 요청받아 생성할 경우 새 폴더에 풀어 실제 Readme 명령·파일 구성·압축 무결성을 확인함.
+약 5분 `G2HW5.mp4`에는 원격 시작·10명 접속·4테이블 동시 진행·Run C 몰수/부전패·Run D crash/복귀/quit과 Crasher/Server 로그·verify/chaos/compare 확인을 포함함. download.txt의 링크를 비로그인 다운로드·재생으로 확인함. 최종 ZIP은 새 폴더에 풀어 Readme의 실행 명령과 파일 구성을 확인함.
 
-Git에는 코드·개발 README·필요 설정만 관리함. 실행 결과·원본·검증 임시물·제출 파일·키는 올리지 않음. 작업 브랜치에서 자기 범위를 구현하고 독립 검사·실제 통합·원격 실행·제출 확인을 구분해 인계함.
+Git에는 소스·개발 README·필요 설정을 관리함. kit 원본·실행 산출물·키·영상은 각 실행 환경에 보관함.
