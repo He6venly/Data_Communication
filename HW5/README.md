@@ -1,6 +1,6 @@
 # HW5 Card Duel League
 
-데이터통신 2조 개발 기준임. 담당, 공통 인터페이스, TEAM 전략을 확정함. 프로젝트 코드·원격 Run은 구현 및 검증 전임.
+데이터통신 2조 개발 기준임. 담당, 공통 인터페이스, TEAM 전략을 확정함. `hw5/server`에서는 Server를 구현하고 대역 Player로 A·B·C를 검증함. 실제 Player·Crasher 통합과 원격 Run은 검증 전임.
 
 공식 기준은 `HW5description.pdf`임. `HW5explanation.pdf`는 세부 구현과 로그를, `HW5QnA.pdf`는 해석과 제출 구성을 확인할 때 사용함. 원본 설정과 정답은 `HW5_student_kit/`를 사용함.
 
@@ -256,11 +256,11 @@ match_log는 경기 mid순, R은 판순, F는 몰수 시에만 기록함. t는 S
 | CRASHER SUMMARY INFO | `fired F/F events: crash C, quit Q` |
 | CRASHER TERMINATE SUCCESS | `all players ended` |
 
-SERVER의 INIT·CONNECT·START·TABLE·TERMINATE, Player의 CONNECT·MATCH·RESULT·FORFEIT·FAULT·VERIFY 등 실제 사용하는 모든 EVENT도 기록·정의함. Run C quit은 Player `FAULT WARN`, Run D quit은 `QUIT WARN`임. 장애 전 마지막 ROUND 번호가 없으면 r=0, 마지막 송신 종류가 없으면 last=-임. 종료한 Player의 TERMINATE는 마지막 줄로 유지함.
+SERVER의 INIT·CONNECT·START·TABLE·METRICS·TERMINATE, Player의 CONNECT·MATCH·RESULT·FORFEIT·FAULT·VERIFY 등 실제 사용하는 모든 EVENT도 기록·정의함. Server의 `METRICS INFO`에는 실행시간·동시 경기 수, 테이블별 가동률·대기, 두 COMMIT을 수신한 판의 지연, 몰수·부전패·STALE·CONFIRM 수, 전략별 전적·평균 득점을 기록함. Run C quit은 Player `FAULT WARN`, Run D quit은 `QUIT WARN`임. 장애 전 마지막 ROUND 번호가 없으면 r=0, 마지막 송신 종류가 없으면 last=-임. 종료한 Player의 TERMINATE는 마지막 줄로 유지함.
 
 ## 실행과 검증
 
-개발 실행은 저장소 `HW5/`에서 함. 아래 명령은 구현할 진입점임. `SERVER_IP`·`KIT`·`RESULTS`·`LOCAL_LOGS`는 실제 값으로 바꿈.
+개발 실행은 저장소 `HW5/`에서 함. `SERVER_IP`·`KIT`·`RESULTS`·`LOCAL_LOGS`는 실제 값으로 바꿈. Server 단독 검증은 `python -m unittest discover -s tests/server -v`로 실행함. kit가 개발저장소 옆의 `HW5_student_kit/`에 없으면 `HW5_KIT_DIR`에 kit 경로를 지정함.
 
 ```text
 python -m src.server --host 0.0.0.0 --port 9500 --seed 2026 --tables 1 --timeout 3000 --run A --out "RESULTS/run_A"
