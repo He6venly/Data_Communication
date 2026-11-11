@@ -63,7 +63,7 @@
 - 기본 게임 포트 9500, 로컬 제어 포트 9700을 예시로 사용함. 호스트·포트·seed·테이블·timeout·Run·출력·전략·고장은 CLI/설정으로 받음
 - 원본 PDF·kit·키·실행 결과·영상·제출물은 Git 밖에 보관함. kit를 수정하지 않고 bot 테스트용 임시 사본·어댑터에서 자기 구현을 연결함
 
-TEAM 기본안은 최고 카드 보존 전략임. 통신 없는 프로토타입으로 규칙과 상성을 확인함.
+P9/P10의 TEAM은 최고 카드 보존 전략으로 확정함. 선택 규칙과 자체 기준 hash는 아래 TEAM 절에 명시함.
 
 **미확정:** 아래 담당 배분은 HW4 역할을 참고한 제안임. 학번, 원격 서비스·인스턴스·OS·주소·접속 계정·실제 포트 가용성은 아직 확정·확인하지 않았음. 원격 환경값이 없어도 로컬 개발은 진행 가능함. 유료 자원 생성·변경은 이번 작업 범위에 포함하지 않음.
 
@@ -75,7 +75,16 @@ TEAM 기본안은 최고 카드 보존 전략임. 통신 없는 프로토타입�
 | 황대겸 | `src/player/`, `tests/player/` / `hw5/player` | 결정적 난수·표준 bot·TEAM·독립 검산·Run C 고장·Run D 제어 상태. bot 41건 ALL PASS, 상성 측정, 대역 Server/Crasher로 송신 차단·복귀·BYE 검증 |
 | 황왕석 | `src/crasher/`, `tools/`, `tests/crasher/`, `tests/tools/` / `hw5/crasher-tools` | C1~C8·제어 TCP·로그, 설정 기반 Player launcher, kit 실행 어댑터·검증·비교 취합. 대역 Player로 지연 ACK·명령 대기·복수 restart·종료 검증 |
 
-실제 구현 전에 담당 배분을 팀 내에서 확정함. 각자 상대 구현을 기다리지 않고 대역과 임시 데이터로 검사하며, 상대 소유 경로는 임의로 수정하지 않음. 통합은 실제 프로그램을 별도 프로세스로 실행해 TCP로 수행함. 기존 HW1~HW4와 다른 사람의 변경을 보존함.
+위 인원 배정은 제안이며, 아래 범위로 개발과 검증을 병행할 수 있음. 각 담당이 자기 테스트 경로에 필요한 대역·검사 데이터를 둠.
+
+| 범위 | 외부 접점 | 단독 검증에 쓰는 대역·데이터 |
+| --- | --- | --- |
+| Server | 게임 TCP와 Run 출력 파일 | `tests/server/`의 대역 Player 10개로 접속, 매칭, 경기 판정, 타임아웃, 출력 검사. 기대 결과는 공식 kit와 기준 데이터로 대조 |
+| Player | 게임 TCP와 Run D 제어 TCP | `tests/player/`의 대역 Server와 대역 Crasher로 게임과 제어 상태 검사. bot 계산은 공식 kit와 TEAM 기준 hash로 검증 |
+| Crasher | Run D 제어 TCP와 장애 로그 | `tests/crasher/`의 대역 Player 10개가 상태와 ACK를 보내도록 구성해 주입·복귀·종료 검사 |
+| 도구 | 설정 파일, subprocess 실행 명령, Run 출력 파일 | `tests/tools/`에서 launcher는 대역 실행 명령, 검증은 제공 샘플과 임시 입력, bot 검사 연결은 테스트용 어댑터로 검사 |
+
+Server·Player·Crasher의 실행 코드는 자기 패키지와 표준 라이브러리만 사용함. 도구는 CLI나 파일로 연결함. 팀에서 공유할 기준은 아래 TCP 메시지, 실행 인자, 파일명·로그, 공식 kit 설정임. 세 프로그램을 모두 실행하는 검증은 `tests/integration/`에서 각 프로그램을 별도 프로세스로 띄워 수행함.
 
 예정 구조이며 빈 코드·빈 테스트 파일을 선생성하지 않음:
 
@@ -149,7 +158,7 @@ kit 방식대로 `mid=seed%45`를 사용했으며, 범위별로 상대마다 A/B
 | PLUS1 | 1662 / 10 / 328 | 83.1% | 1684 / 10 / 306 | 84.2% |
 | BIGSMALL | 1722 / 42 / 236 | 86.1% | 1702 / 34 / 264 | 85.1% |
 
-남은 상금의 순위로 카드 순위를 정하는 방식과 최근 3판의 공개 카드로 다음 카드를 추정하는 방식도 비교함. 최고 카드 보존은 선택 규칙 세 줄로 설명할 수 있고, 두 seed 범위에서 표준 상대별 승률이 72.9~86.1%로 고르게 나와 기본안으로 채택함.
+남은 상금의 순위로 카드 순위를 정하는 방식과 최근 3판의 공개 카드로 다음 카드를 추정하는 방식도 비교함. 최고 카드 보존은 선택 규칙 세 줄로 설명할 수 있고, 두 seed 범위에서 표준 상대별 승률이 72.9~86.1%로 고르게 나와 TEAM으로 확정함.
 
 공식 표준 bot 41건 ALL PASS. seed 2026의 정식 전략 구성에서 통신 없이 45경기를 정순·역순으로 실행해 경기별 결과가 일치함. 자체 기준 hash는 results `5255a2bf`, standings `6a4147b7`임. G44의 TEAM 대 TEAM은 `0:0 DRAW`였음. 프로젝트 Player 연결과 실제 TCP 실행은 미검증.
 
@@ -311,9 +320,9 @@ Run별로 새 출력 폴더를 사용하고 이전 결과를 조용히 덮어쓰
 1. 임시 kit 사본의 mybots 어댑터에 `src.player.bots` 연결 → 공식 41건 ALL PASS → 통신 없는 샘플 45경기 hash 일치. seed 7의 league hash `f11a9a2e`·`ceb40a34`도 확인
 2. 대역 Server/Player로 부분 수신·여러 줄 수신·중복 id·단계 순서·확정 전 REVEAL 금지·자체 CONFIRM 검산 확인
 3. 로컬 실제 TCP를 sample 설정 M=1, M=2, M=4로 실행 → results `cfde2bce`·standings `c8a0c732`, verify overlap 0 확인. M=5는 지원 범위 검사
-4. TEAM 고정 후 정식 A/B의 두 결과 파일을 바이트·hash로 비교, 정상 CONFIRM 전부 OK/OK, VERIFY FAIL 0건 확인
+4. 확정 TEAM을 사용한 정식 A/B의 두 결과 파일을 바이트·hash로 비교하고, 자체 기준 results `5255a2bf`·standings `6a4147b7`과 대조. 정상 CONFIRM 전부 OK/OK, VERIFY FAIL 0건 확인
 5. Run C 고장 4건의 선수·판·사유·점수, 늦은 COMMIT 폐기, QUIT 이후 경기·마지막 BYE 확인. 두 위반·CONFIRM QUIT·DEAD+침묵·잘못된 카드/hash 검사 우선순위도 대역으로 확인
-6. Crasher 대역으로 C1~C8·ACK 기준 4~5초·명령 대기·상대 장애 제외·여러 crash 복귀·모든 END 종료 확인. 실제 D를 여러 seed로 반복해 매번 chaos PASS 확인
+6. 대역 Player로 Crasher의 C1~C8·ACK 기준 4~5초·명령 대기·상대 장애 제외·여러 crash 복귀·모든 END 종료 확인. 실제 D를 여러 seed로 반복해 매번 chaos PASS 확인
 7. 외부 Server+로컬 Player 구성으로 정식 A/B/C/D 새 실행 → 로그 취합 → 공식 검사·실측·영상·제출 문서 작성
 
 예정 자체 검사 명령은 `python -m unittest discover -s tests/담당경로 -p "test_*.py" -v`임. 현재 테스트 파일은 없음. 테스트 0건·필수 skip·대역만의 PASS를 실제 통합 PASS로 보고하지 않음. 도구의 정상 fixture뿐 아니라 파일 누락·CRLF·hash 손상·잘못된 로그·비정상 자식 종료가 실패로 잡히는지도 검사함.
