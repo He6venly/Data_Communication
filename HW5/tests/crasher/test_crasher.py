@@ -12,9 +12,9 @@ class FakeController:
         self.condition = threading.Condition()
         self.players = {player: PlayerState(None) for player in range(1, 11)}
         self.players[1].mode = "PLAYING"
-        self.players[1].mid = 7
+        self.players[1].mid = 0
         self.players[2].mode = "PLAYING"
-        self.players[2].mid = 7
+        self.players[2].mid = 0
         self.error = None
         self.commands = []
         self.logs = []
@@ -68,6 +68,14 @@ class CrasherTests(unittest.TestCase):
         quit_count = sum(event.kind == "QUIT" for event in first.events)
         self.assertIn(quit_count, (1, 2))
         self.assertEqual([event.trigger for event in first.events], sorted(event.trigger for event in first.events))
+
+    def test_player_with_quit_opponent_is_not_selected(self):
+        controller = FakeController()
+        scheduler = CrashScheduler(controller, 11)
+        scheduler.faulty.add(2)
+        controller.players[2].mode = "QUIT"
+        controller.players[2].mid = None
+        self.assertNotIn(1, scheduler.eligible_players())
 
     @patch("src.crasher.scheduler.time.sleep", return_value=None)
     def test_crash_ack_restart_and_idle(self, _sleep):

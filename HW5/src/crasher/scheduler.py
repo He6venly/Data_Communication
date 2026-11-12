@@ -6,6 +6,9 @@ from threading import Thread
 from .controller import PlayerController
 
 
+PAIRS = [(a, b) for a in range(1, 11) for b in range(a + 1, 11)]
+
+
 @dataclass(frozen=True)
 class CrashEvent:
     kind: str
@@ -55,14 +58,9 @@ class CrashScheduler:
         for player, state in self.controller.players.items():
             if state.mode != "PLAYING" or player in self.faulty or player in self.pending:
                 continue
-            opponent_busy = any(
-                other != player
-                and other_state.mode in ("PLAYING", "CRASHED")
-                and other_state.mid == state.mid
-                and (other in self.faulty or other in self.pending)
-                for other, other_state in self.controller.players.items()
-            )
-            if not opponent_busy:
+            a, b = PAIRS[state.mid]
+            opponent = b if player == a else a
+            if opponent not in self.faulty and opponent not in self.pending:
                 result.append(player)
         return result
 
