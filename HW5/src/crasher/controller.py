@@ -97,11 +97,15 @@ class PlayerController:
                 sock.close()
                 raise
 
-    # 선택한 Player에게 한 줄짜리 제어 명령을 보낸다.
-    def send(self, player: int, command: str) -> None:
+    # 이미 상태 Lock을 잡은 곳에서 제어 명령을 보낸다.
+    def send_locked(self, player: int, command: str) -> None:
         data = (command + "\n").encode("ascii")
+        self.players[player].sock.sendall(data)
+
+    # 선택한 Player에게 상태 Lock을 잡고 제어 명령을 보낸다.
+    def send(self, player: int, command: str) -> None:
         with self.condition:
-            self.players[player].sock.sendall(data)
+            self.send_locked(player, command)
 
     # 조건을 만족할 때까지 기다리되 수신 Thread 오류도 함께 확인한다.
     def wait_for(self, predicate) -> None:

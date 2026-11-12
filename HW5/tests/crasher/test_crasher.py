@@ -20,18 +20,21 @@ class FakeController:
         self.logs = []
 
     # 테스트에서는 명령을 받자마자 Player의 ACK 상태로 바꾼다.
-    def send(self, player, command):
+    def send_locked(self, player, command):
         self.commands.append((player, command))
+        if command == "CRASH":
+            self.players[player].mode = "CRASHED"
+        elif command == "RESTART":
+            self.players[player].mode = "IDLE"
+            self.players[player].mid = None
+        elif command == "QUIT":
+            self.players[player].mode = "QUIT"
+            self.players[player].mid = None
+        self.condition.notify_all()
+
+    def send(self, player, command):
         with self.condition:
-            if command == "CRASH":
-                self.players[player].mode = "CRASHED"
-            elif command == "RESTART":
-                self.players[player].mode = "IDLE"
-                self.players[player].mid = None
-            elif command == "QUIT":
-                self.players[player].mode = "QUIT"
-                self.players[player].mid = None
-            self.condition.notify_all()
+            self.send_locked(player, command)
 
     def log(self, event, status, message):
         self.logs.append((event, status, message))

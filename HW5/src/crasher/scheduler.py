@@ -79,7 +79,7 @@ class CrashScheduler:
                     self.pending.discard(player)
                     self.faulty.discard(player)
                     return
-            self.controller.send(player, "RESTART")
+                self.controller.send_locked(player, "RESTART")
             self.controller.log("RESTART", "INFO", f"#{number} P{player} after {delay:.2f}s")
             self.controller.wait_for(lambda: self.controller.players[player].mode in ("IDLE", "END"))
             with self.controller.condition:
@@ -113,8 +113,8 @@ class CrashScheduler:
                     self.pending.discard(player)
                     continue
                 self.faulty.add(player)
+                self.controller.send_locked(player, event.kind)
 
-            self.controller.send(player, event.kind)
             self.controller.log(event.kind, "WARN", f"#{number} P{player} (PLAYING G{mid:02d})")
             self.fired += 1
 
