@@ -1,6 +1,6 @@
 # HW5 Card Duel League
 
-데이터통신 2조 개발 기준임. 담당, 공통 인터페이스, TEAM 전략을 확정함. `hw5/server`에서는 Server를 구현하고 대역 Player로 A·B·C를 검증함. 실제 Player·Crasher 통합과 원격 Run은 검증 전임.
+데이터통신 2조 개발 기준임. 담당, 공통 인터페이스, TEAM 전략을 확정함. `hw5/server`에서는 Server를 구현하고 대역 Player로 A·B·C를 검증함. 실제 Player·Crasher를 모두 포함한 통합과 원격 Run은 검증 전임.
 
 공식 기준은 `HW5description.pdf`임. `HW5explanation.pdf`는 세부 구현과 로그를, `HW5QnA.pdf`는 해석과 제출 구성을 확인할 때 사용함. 원본 설정과 정답은 `HW5_student_kit/`를 사용함.
 
@@ -203,11 +203,17 @@ Run C hash·P8 부전패 개수·최종 전적은 매칭 순서에 따라 달라
 - C7. quit은 영구 장애로 유지하고 재선택하지 않음
 - C8. 모든 Player의 END 확인 후 요약·TERMINATE. 종료 판정용 END/QUIT과 실제 프로세스 종료용 END를 구분함
 
-Player는 MATCH에서 PLAYING 보고 후 대기 명령을 적용함. IDLE 중 받은 CRASH/QUIT은 INFO 기록 후 다음 MATCH에서 실행하며, 실제 적용에만 WARN을 한 번 기록함. 게임 송신 직전 mode 검사와 송신을 같은 Player 상태 Lock 안에서 수행하여 think 중 crash 뒤 COMMIT이 새지 않게 함. 이 Lock은 Server의 공유 상태 Lock과 다른 로컬 Lock임.
+Player는 MATCH에서 PLAYING 보고 후 대기 명령을 적용함. IDLE 중 받은 CRASH/QUIT은 INFO 기록 후 다음 MATCH에서 실행하며, 실제 적용에만 WARN을 한 번 기록함. Player의 로컬 상태 Lock 안에서 현재 경기·mode 확인과 게임 송신을 함께 처리함.
 
-CRASHED·QUIT 상태에서도 게임 소켓을 읽어 BYE 외 줄은 버림. RESTART 시 이미 쌓인 사용자·소켓 수신 데이터를 비우고 REJOIN·STATE IDLE을 보낸 뒤 **새 MATCH부터** Bot을 생성함. crash 중 버린 MATCH의 경기는 복귀 시점이 마감 전이어도 새 MATCH가 올 때까지 무시함. Server는 REJOIN을 기록하고 기존 단계의 마감까지 대기함.
+- MATCH_END를 처리할 때 **CONFIRM 송신 → IDLE 전환 → `STATE Pk IDLE` 송신**을 한 번의 Lock 획득으로 묶음(PPT p.118). 먼저 적용된 CRASH/QUIT은 해당 경기의 CONFIRM을 막음. CONFIRM이 먼저 나갔다면 이후 들어온 명령은 다음 MATCH에 적용함.
+- CRASHED·QUIT에서는 게임 소켓을 읽되 BYE 외의 줄은 버리고 응답하지 않음. RESTART 시 쌓인 데이터를 버릴 때도 BYE는 처리함. BYE를 받지 않았다면 REJOIN 송신 → IDLE 전환 → `STATE Pk IDLE` 송신 순으로 복귀함. 복귀 뒤 새 MATCH부터 진행함. Server는 REJOIN을 기록하고 기존 단계의 마감을 유지함.
+- QUIT은 게임 소켓으로 `QUIT mid`를 보낸 후 BYE까지 연결을 유지함. BYE 시 모든 Player가 `STATE Pk END`와 TERMINATE를 남김. BYE가 RESTART보다 먼저 도착하면 종료가 우선이며 REJOIN을 기록하지 않음. Crasher는 END를 받은 선수의 예약된 복귀를 취소함. 대진 중 두 장애 선수가 만나면 FORFEIT_BOTH 규칙으로 처리함.
 
-QUIT은 게임 소켓으로 `QUIT mid`를 보내고 BYE까지 유지함. BYE 시 QUIT 선수도 `STATE END`와 TERMINATE를 남김. 마지막 경기 crash·리그 종료 중 restart·제어 EOF를 검사해 제어 스레드/타이머가 종료를 막지 않게 함. 일정상 두 장애 선수가 만나는 경기는 FORFEIT_BOTH 규칙으로 처리함.
+### 종료 전적과 Run D 검증
+
+- Server는 전체 45경기로 standings를 만들고, TCP의 `LEAGUE_END rank pts`에는 순위·승점만 보냄. Player는 정상 처리한 MATCH_END마다 mid당 한 번 W/D/L을 집계함. QUIT한 Player는 `TERMINATE | WARN | left at Gxx`로 종료함.
+- QUIT하지 않은 Player는 9경기 결과를 처리하고 TERMINATE의 순위·승점·W/D/L을 standings와 대조함. Run D에서 crash로 결과를 버렸다면 수신한 순위·승점과 확인한 경기의 W/D/L을 기록하고 뒤에 `observed_only=yes missing=N`을 붙임. 이때 전체 전적은 standings를 기준으로 하고, Player 로그의 RESULT를 같은 mid의 Server 결과와 대조해 누락이 crash 구간으로 설명되는지 확인함. kit 예제도 P10의 Player 전적은 W2 D0 L5, 전체 전적은 W2 D0 L7임. TCP 필드를 추가하거나 누락된 W/D/L을 추정해 로그를 채우지 않음.
+- QUIT하지 않은 Player가 순위를 받지 못하면 사유를 TERMINATE WARN으로 남기고 해당 실행은 검증 실패로 처리함. BYE가 먼저 와 Player의 REJOIN이 빠졌거나 보낸 장애 명령이 적용되지 않은 실행 역시 제출 기준 미달임. kit의 chaos PASS와 아래 종료 검사를 모두 충족한 실행만 제출함.
 
 ## 파일·필수 로그
 
@@ -247,7 +253,7 @@ match_log는 경기 mid순, R은 판순, F는 몰수 시에만 기록함. t는 S
 | Pk CRASH/QUIT WARN | `Gxx r=n last=L ...` |
 | Pk REJOIN INFO | `REJOIN sent ...` |
 | Pk TERMINATE SUCCESS | `rank=r pts=p Ww Dd Ll` |
-| Pk TERMINATE WARN | `left at Gxx ...` |
+| Pk TERMINATE WARN | `left at Gxx ...` (QUIT), `BYE received before league ranking` (순위 미수신) |
 | CRASHER PLAN INFO | `seed=S events=F (crash C, quit Q)` |
 | CRASHER CRASH/QUIT WARN | `#n Pk (PLAYING Gxx)` |
 | CRASHER CRASH_ACK INFO | `#n Pk crashed in Gxx` |
@@ -275,8 +281,8 @@ B/C/D는 Server의 `--tables 4`와 해당 Run·경로를 지정함. launcher는 
 
 1. 각 담당이 대역 검사와 kit로 자신의 프로그램을 확인함. bot 테스트는 kit 임시 사본의 mybots 어댑터로 `src.player.bots`를 연결함. 표준 41건 ALL PASS와 샘플·TEAM 기준 hash를 확인함.
 2. 실제 TCP를 로컬에서 샘플 설정으로 M=1·2·4에서 확인함. results `cfde2bce`·standings `c8a0c732`, overlap 0이 기준임. 정식 설정 A/B는 파일 바이트와 자체 기준 `5255a2bf`·`6a4147b7`을 대조함.
-3. 로컬 C에서 고장 4건의 판·사유·점수와 QUIT 이후 부전패를 확인함. D는 seed를 바꿔 실행하고 Crasher 사건과 영향을 대조함.
-4. 제출용 A–D는 원격 Server와 로컬 Player·Crasher에서 실행함. 각 Run은 45경기·판 오류 0·overlap 0·verify PASS, A/B는 results·standings 동일·정상 CONFIRM `OK/OK`·VERIFY FAIL 0건, D는 chaos PASS가 기준임. 끝까지 참여한 Player의 TERMINATE 순위·승점·W/D/L을 standings와 대조함.
+3. 로컬 C에서 고장 4건의 판·사유·점수와 QUIT 이후 부전패를 확인함. D는 CONFIRM 전후 CRASH/QUIT, 복귀 전 BYE, crash로 MATCH_END를 못 받은 경우를 대역으로 확인하고 실제 실행의 장애·복귀 로그와 영향을 대조함.
+4. 제출용 A–D는 원격 Server와 로컬 Player·Crasher에서 실행함. 각 Run은 45경기·판 오류 0·overlap 0·verify PASS, A/B는 results·standings 동일·정상 CONFIRM `OK/OK`·VERIFY FAIL 0건, D는 chaos PASS와 위 종료 전적 검사를 기준으로 함.
 
 제공 `2_tools/python/`의 세 파일을 같은 작업 폴더에 두고 실행함. 아래 RESULTS는 Run 폴더가 모인 실제 경로임.
 
