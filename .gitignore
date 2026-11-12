@@ -2,3 +2,9 @@ __pycache__/
 *.pyc
 *.pem
 *.key
+
+# 교수님 배포 자료와 검사 과정의 임시 파일은 저장소에 올리지 않는다.
+/HW5_student_kit/
+/tmp/
+/*.pdf
+/*.mp4
