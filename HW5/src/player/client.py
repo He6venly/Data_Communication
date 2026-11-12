@@ -242,16 +242,16 @@ class Player:
             else:
                 won = self.scores[self.side] > self.scores[1-self.side]
                 self.stats[0 if won else 2] += 1
-            self.state.send(f"CONFIRM {self.mid} {self.scores[0]}:{self.scores[1]}", self.generation)
+            # 확인을 보낸 뒤 들어온 장애는 끝난 경기 대신 다음 MATCH에 적용해줌
+            with self.state.lock:
+                if self.state.send(f"CONFIRM {self.mid} {self.scores[0]}:{self.scores[1]}", self.generation):
+                    self.state.mode = "IDLE"
+                    self.state.report()
             self.log("RESULT", "WARN" if self.match_failed else "SUCCESS", f"G{self.mid:02d} {self.scores[0]}:{self.scores[1]} {expected}")
             self.seen.add(self.mid)
             self.bot = None
             if hasattr(self, "forfeit"):
                 del self.forfeit
-            with self.state.lock:
-                if self.state.mode == "PLAYING" and self.generation == self.state.generation:
-                    self.state.mode = "IDLE"
-                    self.state.report()
         else:
             raise ValueError(f"invalid {kind} fields")
         return True
@@ -272,21 +272,16 @@ class Player:
             elif self.rank is not None:
                 w, d, l = self.stats
                 missing = 9 - len(self.seen)
-                residual = self.pts - (3*w+d)
-                # 버린 경기의 전적은 승점으로 하나로 정해질 때만 채우고 애매하면 따로 표시함
-                possibilities = [(a, b, missing-a-b) for a in range(missing+1)
-                                 for b in range(missing-a+1) if 3*a+b == residual]
+                # 놓친 경기는 승점으로 추정하지 않고 직접 확인한 전적만 적어줌
                 extra = ""
                 status = "SUCCESS"
-                if self.args.run == "D" and len(possibilities) == 1:
-                    a, b, c = possibilities[0]
-                    w, d, l = w+a, d+b, l+c
-                elif self.args.run == "D" and missing:
+                if self.args.run == "D" and missing:
                     status = "WARN"
                     extra = f" observed_only=yes missing={missing} (results discarded during crash)"
                 self.log("TERMINATE", "FAIL" if self.failed else status, f"rank={self.rank} pts={self.pts} W{w} D{d} L{l}{extra}")
             else:
                 self.log("TERMINATE", "WARN", "BYE received before league ranking")
+                self.failed = True
             return 1 if self.failed else 0
         except (OSError, EOFError, ValueError, KeyboardInterrupt) as exc:
             with self.state.lock:

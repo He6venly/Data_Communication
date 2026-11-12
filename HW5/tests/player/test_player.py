@@ -195,16 +195,88 @@ class PlayerTests(unittest.TestCase):
         self.assertEqual(h.result, 1)
 
     def test_discarded_run_d_results_are_not_invented(self):
-        # 침묵 중 버린 전적을 하나로 알 수 없으면 확정된 전적처럼 적지 않음
-        for missing, expected in ((1, "W1 D0 L8"), (3, "observed_only=yes missing=3")):
+        # 승점으로 놓친 결과를 짐작할 수 있어도 관측한 전적만 그대로 적어줌
+        for missing, points in ((1, 3), (1, 0), (3, 3)):
             h = self.make(args(run="D"))
             h.client.seen = set(range(9-missing))
             h.client.stats = [0, 0, 9-missing]
-            h.send("LEAGUE_END 5 3", "BYE")
+            h.send(f"LEAGUE_END 5 {points}", "BYE")
             h.thread.join(3)
             self.assertEqual(h.result, 0)
-            self.assertIn(expected, h.records[-1][2])
-            self.assertEqual(h.records[-1][1], "SUCCESS" if missing == 1 else "WARN")
+            self.assertIn(f"W0 D0 L{9-missing} observed_only=yes missing={missing}", h.records[-1][2])
+            self.assertEqual(h.records[-1][1], "WARN")
+
+
+class ConfirmBoundaryTests(unittest.TestCase):
+    def prepare(self):
+        game, peer = socket.socketpair()
+        peer.settimeout(0.1)
+        self.addCleanup(game.close)
+        self.addCleanup(peer.close)
+        player = Player(args(run="D"), game, lambda *record: None)
+        self.addCleanup(player.state.close)
+        player.handle("WELCOME P1 2026 3000")
+        player.handle("START 45")
+        player.handle("MATCH 0 A P2")
+        player.handle("FORFEIT 0 B TIMEOUT")
+        return player, peer
+
+    def test_command_after_confirm_waits_for_idle_and_next_match(self):
+        # CONFIRM 직후 장애가 들어와도 IDLE 보고를 마치고 다음 경기로 미뤄줌
+        for command in ("CRASH", "QUIT"):
+            with self.subTest(command=command):
+                player, peer = self.prepare()
+                attempted, released = threading.Event(), threading.Event()
+                reports = []
+                original = player.state.send
+                def inject():
+                    attempted.set()
+                    player.state.command(command)
+                    released.set()
+                worker = threading.Thread(target=inject)
+                def send(line, generation):
+                    result = original(line, generation)
+                    worker.start()
+                    self.assertTrue(attempted.wait(1))
+                    # 잘못된 이전 구현은 여기서 장애가 적용되고 새 구현은 Lock에서 대기함
+                    released.wait(0.05)
+                    return result
+                player.state.report = lambda mode=None: reports.append(mode or player.state.mode)
+                try:
+                    with patch.object(player.state, "send", side_effect=send):
+                        player.handle("MATCH_END 0 FORFEIT_B 55 0")
+                    worker.join(2)
+                    self.assertFalse(worker.is_alive())
+                    self.assertEqual(peer.recv(1024), b"CONFIRM 0 55:0\n")
+                    self.assertEqual((player.state.mode, player.state.pending), ("IDLE", command))
+                    self.assertEqual(reports, ["IDLE"])
+                    player.handle("MATCH 1 A P3")
+                    self.assertEqual(reports, ["IDLE", "PLAYING", "CRASHED" if command == "CRASH" else "QUIT"])
+                    if command == "QUIT":
+                        self.assertEqual(peer.recv(1024), b"QUIT 1\n")
+                finally:
+                    worker.join(2)
+
+    def test_command_before_confirm_blocks_it(self):
+        for command in ("CRASH", "QUIT"):
+            with self.subTest(command=command):
+                player, peer = self.prepare()
+                player.state.command(command)
+                if command == "QUIT":
+                    self.assertEqual(peer.recv(1024), b"QUIT 0\n")
+                player.handle("MATCH_END 0 FORFEIT_B 55 0")
+                with self.assertRaises(socket.timeout):
+                    peer.recv(1024)
+                self.assertEqual(player.seen, set())
+
+    def test_buffered_bye_before_restart_never_sends_rejoin(self):
+        player, peer = self.prepare()
+        player.state.command("CRASH")
+        player.lines.buffer[:] = b"LEAGUE_END 5 3\nBYE\n"
+        player.state.command("RESTART")
+        self.assertEqual(player.read(), "BYE")
+        with self.assertRaises(socket.timeout):
+            peer.recv(1024)
 
 
 class StateTests(unittest.TestCase):
@@ -341,7 +413,7 @@ class ControlTests(unittest.TestCase):
         self.assertEqual(read(control, lines), "STATE P1 END")
         h.thread.join(3)
         self.assertFalse(h.client.state.thread.is_alive())
-        self.assertEqual(h.result, 0)
+        self.assertEqual(h.result, 1)
 
     def test_quit_midmatch_and_bye_end(self):
         h, control, lines = self.make()
@@ -381,7 +453,7 @@ class ControlTests(unittest.TestCase):
         self.assertEqual(read(control, lines), "STATE P1 PLAYING 1")
         self.assertEqual(h.line(), "CONFIRM 1 55:0")
         self.assertEqual(read(control, lines), "STATE P1 IDLE")
-        h.send("BYE")
+        h.send("LEAGUE_END 5 3", "BYE")
         self.assertEqual(read(control, lines), "STATE P1 END")
         h.thread.join(3)
         self.assertEqual(h.result, 0)
@@ -412,7 +484,7 @@ class ControlTests(unittest.TestCase):
         self.assertIn(read(control, lines), ("STATE P1 END", "STATE P1 IDLE"))
         h.thread.join(3)
         self.assertFalse(h.thread.is_alive())
-        self.assertEqual(h.result, 0, h.records)
+        self.assertEqual(h.result, 1, h.records)
         self.assertFalse(h.client.state.thread.is_alive())
 
     def test_idle_quit_reports_playing_before_quit(self):
