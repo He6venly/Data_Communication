@@ -71,22 +71,25 @@ class CrashScheduler:
 
     # CRASH ACK부터 4~5초 뒤에 RESTART를 보내고 IDLE 복귀를 확인한다.
     def restart_after_delay(self, number: int, player: int, mid: int, delay: float) -> None:
-        time.sleep(delay)
-        with self.controller.condition:
-            state = self.controller.players[player]
-            if state.mode == "END":
+        try:
+            time.sleep(delay)
+            with self.controller.condition:
+                state = self.controller.players[player]
+                if state.mode == "END":
+                    self.pending.discard(player)
+                    self.faulty.discard(player)
+                    return
+            self.controller.send(player, "RESTART")
+            self.controller.log("RESTART", "INFO", f"#{number} P{player} after {delay:.2f}s")
+            self.controller.wait_for(lambda: self.controller.players[player].mode in ("IDLE", "END"))
+            with self.controller.condition:
+                ended = self.controller.players[player].mode == "END"
                 self.pending.discard(player)
                 self.faulty.discard(player)
-                return
-        self.controller.send(player, "RESTART")
-        self.controller.log("RESTART", "INFO", f"#{number} P{player} after {delay:.2f}s")
-        self.controller.wait_for(lambda: self.controller.players[player].mode in ("IDLE", "END"))
-        with self.controller.condition:
-            ended = self.controller.players[player].mode == "END"
-            self.pending.discard(player)
-            self.faulty.discard(player)
-        if not ended:
-            self.controller.log("REJOINED", "INFO", f"#{number} P{player} back to IDLE")
+            if not ended:
+                self.controller.log("REJOINED", "INFO", f"#{number} P{player} back to IDLE")
+        except BaseException as error:
+            self.controller.record_error(error)
 
     # 한 사건의 대상을 고르고 명령 직전에 자격을 다시 검사해 전송한다.
     def fire_event(self, number: int, event: CrashEvent) -> bool:

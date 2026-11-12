@@ -42,6 +42,11 @@ class FakeController:
             if not predicate():
                 raise TimeoutError("test state did not change")
 
+    def record_error(self, error):
+        self.error = error
+        with self.condition:
+            self.condition.notify_all()
+
     def finished_matches(self):
         return 0
 
@@ -55,6 +60,9 @@ class CrasherTests(unittest.TestCase):
 
         controller.update_state(3, ["STATE", "P3", "PLAYING", "18"])
         self.assertEqual((controller.players[3].mode, controller.players[3].mid), ("PLAYING", 18))
+        controller.update_state(3, ["STATE", "P3", "IDLE"])
+        self.assertEqual(controller.players[3].idle_count, 1)
+        controller.update_state(3, ["STATE", "P3", "CRASHED", "18"])
         controller.update_state(3, ["STATE", "P3", "IDLE"])
         self.assertEqual(controller.players[3].idle_count, 1)
         with self.assertRaises(ValueError):
@@ -76,6 +84,26 @@ class CrasherTests(unittest.TestCase):
         controller.players[2].mode = "QUIT"
         controller.players[2].mid = None
         self.assertNotIn(1, scheduler.eligible_players())
+
+    def test_summary_then_wait_all_players_end(self):
+        controller = FakeController()
+        scheduler = CrashScheduler(controller, 11)
+        scheduler.events = []
+        thread = threading.Thread(target=scheduler.run)
+        thread.start()
+        for _ in range(100):
+            if controller.logs:
+                break
+            threading.Event().wait(0.001)
+        self.assertEqual([entry[0] for entry in controller.logs], ["SUMMARY"])
+        self.assertTrue(thread.is_alive())
+        with controller.condition:
+            for state in controller.players.values():
+                state.mode = "END"
+                state.mid = None
+            controller.condition.notify_all()
+        thread.join(timeout=1)
+        self.assertEqual([entry[0] for entry in controller.logs], ["SUMMARY", "TERMINATE"])
 
     @patch("src.crasher.scheduler.time.sleep", return_value=None)
     def test_crash_ack_restart_and_idle(self, _sleep):

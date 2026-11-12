@@ -54,10 +54,17 @@ class PlayerController:
 
         with self.condition:
             state = self.players[player]
-            if mode == "IDLE" and state.mode != "IDLE":
+            if mode == "IDLE" and state.mode == "PLAYING":
                 state.idle_count += 1
             state.mode = mode
             state.mid = mid
+            self.condition.notify_all()
+
+    # 보조 Thread에서 생긴 오류를 메인 대기 쪽으로 전달한다.
+    def record_error(self, error: BaseException) -> None:
+        with self.condition:
+            if self.error is None:
+                self.error = error
             self.condition.notify_all()
 
     # 한 Player의 제어 연결에서 STATE 줄을 계속 읽는다.
@@ -66,10 +73,7 @@ class PlayerController:
             while raw := stream.readline():
                 self.update_state(player, raw.decode("ascii").split())
         except (OSError, UnicodeError, ValueError) as error:
-            with self.condition:
-                if self.error is None:
-                    self.error = error
-                self.condition.notify_all()
+            self.record_error(error)
         finally:
             stream.close()
 
