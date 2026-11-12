@@ -25,6 +25,7 @@ class FakeController:
         if command == "CRASH":
             self.players[player].mode = "CRASHED"
         elif command == "RESTART":
+            self.players[player].idle_reports += 1
             self.players[player].mode = "IDLE"
             self.players[player].mid = None
         elif command == "QUIT":
@@ -68,6 +69,7 @@ class CrasherTests(unittest.TestCase):
         controller.update_state(3, ["STATE", "P3", "CRASHED", "18"])
         controller.update_state(3, ["STATE", "P3", "IDLE"])
         self.assertEqual(controller.players[3].idle_count, 1)
+        self.assertEqual(controller.players[3].idle_reports, 2)
         with self.assertRaises(ValueError):
             controller.update_state(3, ["STATE", "P3", "PLAYING"])
 
@@ -88,17 +90,29 @@ class CrasherTests(unittest.TestCase):
         controller.players[2].mid = None
         self.assertNotIn(1, scheduler.eligible_players())
 
-    def test_summary_then_wait_all_players_end(self):
+    def test_missed_match_stays_blocked_after_player_rejoins(self):
+        controller = FakeController()
+        scheduler = CrashScheduler(controller, 11)
+        controller.players[7].mode = "PLAYING"
+        controller.players[7].mid = 40
+        controller.players[9].mode = "IDLE"
+        controller.players[9].mid = None
+        scheduler.blocked_mids.add(40)
+
+        self.assertNotIn(7, scheduler.eligible_players())
+        controller.players[7].mode = "IDLE"
+        controller.players[7].mid = None
+        scheduler.eligible_players()
+        self.assertNotIn(40, scheduler.blocked_mids)
+
+    def test_wait_all_players_end_then_summary(self):
         controller = FakeController()
         scheduler = CrashScheduler(controller, 11)
         scheduler.events = []
         thread = threading.Thread(target=scheduler.run)
         thread.start()
-        for _ in range(100):
-            if controller.logs:
-                break
-            threading.Event().wait(0.001)
-        self.assertEqual([entry[0] for entry in controller.logs], ["SUMMARY"])
+        threading.Event().wait(0.01)
+        self.assertEqual(controller.logs, [])
         self.assertTrue(thread.is_alive())
         with controller.condition:
             for state in controller.players.values():
@@ -107,6 +121,54 @@ class CrasherTests(unittest.TestCase):
             controller.condition.notify_all()
         thread.join(timeout=1)
         self.assertEqual([entry[0] for entry in controller.logs], ["SUMMARY", "TERMINATE"])
+
+    @patch("src.crasher.scheduler.time.sleep", return_value=None)
+    def test_crash_ack_can_move_to_next_match(self, _sleep):
+        controller = FakeController()
+        scheduler = CrashScheduler(controller, 11)
+        scheduler.random.choice = lambda players: 1
+        scheduler.random.uniform = lambda start, end: 4.25 if start == 4 else 0
+        original_send = controller.send_locked
+
+        def send_on_next_match(player, command):
+            if command == "CRASH":
+                controller.commands.append((player, command))
+                controller.players[player].mode = "CRASHED"
+                controller.players[player].mid = 9
+                controller.condition.notify_all()
+            else:
+                original_send(player, command)
+
+        controller.send_locked = send_on_next_match
+        self.assertTrue(scheduler.fire_event(1, CrashEvent("CRASH", 2)))
+        for thread in scheduler.restart_threads:
+            thread.join(timeout=1)
+
+        self.assertIn(0, scheduler.blocked_mids)
+        self.assertIn(9, scheduler.blocked_mids)
+        self.assertIn("crashed in G09", controller.logs[1][2])
+
+    @patch("src.crasher.scheduler.time.sleep", return_value=None)
+    def test_restart_notices_fast_idle_then_playing(self, _sleep):
+        controller = FakeController()
+        scheduler = CrashScheduler(controller, 11)
+        controller.players[1].mode = "CRASHED"
+        controller.players[1].mid = 0
+        scheduler.faulty.add(1)
+        scheduler.pending.add(1)
+
+        def restart_and_start_next(player, command):
+            controller.commands.append((player, command))
+            controller.players[player].idle_reports += 1
+            controller.players[player].mode = "PLAYING"
+            controller.players[player].mid = 8
+            controller.condition.notify_all()
+
+        controller.send_locked = restart_and_start_next
+        scheduler.restart_after_delay(1, 1, 0, 4.2)
+        self.assertNotIn(1, scheduler.faulty)
+        self.assertNotIn(1, scheduler.pending)
+        self.assertEqual(controller.logs[-1][0], "REJOINED")
 
     @patch("src.crasher.scheduler.time.sleep", return_value=None)
     def test_crash_ack_restart_and_idle(self, _sleep):

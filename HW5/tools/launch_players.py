@@ -68,9 +68,24 @@ def build_commands(
     return commands
 
 
+# 실행 중인 Player 프로세스를 종료하고 모두 끝날 때까지 기다린다.
+def stop_processes(processes: list[subprocess.Popen]) -> None:
+    for process in processes:
+        if process.poll() is None:
+            process.terminate()
+    for process in processes:
+        process.wait()
+
+
 # 열 개 프로세스를 시작하고 하나라도 실패하면 나머지도 종료한다.
 def launch(commands: list[list[str]], cwd: Path) -> int:
-    processes = [subprocess.Popen(command, cwd=cwd) for command in commands]
+    processes = []
+    try:
+        for command in commands:
+            processes.append(subprocess.Popen(command, cwd=cwd))
+    except BaseException:
+        stop_processes(processes)
+        raise
     try:
         while processes:
             for process in list(processes):
@@ -79,18 +94,12 @@ def launch(commands: list[list[str]], cwd: Path) -> int:
                     continue
                 processes.remove(process)
                 if result != 0:
-                    for running in processes:
-                        running.terminate()
-                    for running in processes:
-                        running.wait()
+                    stop_processes(processes)
                     return result
             if processes:
                 time.sleep(0.05)
     except KeyboardInterrupt:
-        for process in processes:
-            process.terminate()
-        for process in processes:
-            process.wait()
+        stop_processes(processes)
         return 130
     return 0
 

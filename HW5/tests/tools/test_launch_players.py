@@ -1,8 +1,9 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import Mock, patch
 
-from tools.launch_players import build_commands, read_config
+from tools.launch_players import build_commands, launch, read_config
 
 
 class LaunchPlayersTests(unittest.TestCase):
@@ -40,6 +41,18 @@ class LaunchPlayersTests(unittest.TestCase):
         self.assertEqual(len(commands), 10)
         self.assertEqual([command[command.index("--id") + 1] for command in commands], [str(i) for i in range(1, 11)])
         self.assertTrue(all(command[-2:] == ["--crasher", "127.0.0.1:9700"] for command in commands))
+
+    @patch("tools.launch_players.subprocess.Popen")
+    def test_spawn_failure_stops_already_started_process(self, popen):
+        first = Mock()
+        first.poll.return_value = None
+        popen.side_effect = [first, OSError("second process failed")]
+
+        with self.assertRaisesRegex(OSError, "second process failed"):
+            launch([["first"], ["second"]], Path("."))
+
+        first.terminate.assert_called_once_with()
+        first.wait.assert_called_once_with()
 
 
 if __name__ == "__main__":

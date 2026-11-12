@@ -23,6 +23,7 @@ class CrashScheduler:
         self.events = self.make_plan()
         self.faulty: set[int] = set()
         self.pending: set[int] = set()
+        self.blocked_mids: set[int] = set()
         self.restart_threads: list[Thread] = []
         self.fired = 0
 
@@ -54,9 +55,16 @@ class CrashScheduler:
 
     # 현재 경기 중이며 본인과 상대가 장애 집합에 없는 Player를 찾는다.
     def eligible_players(self) -> list[int]:
+        active_mids = {
+            state.mid for state in self.controller.players.values()
+            if state.mode in ("PLAYING", "CRASHED") and state.mid is not None
+        }
+        self.blocked_mids.intersection_update(active_mids)
         result = []
         for player, state in self.controller.players.items():
             if state.mode != "PLAYING" or player in self.faulty or player in self.pending:
+                continue
+            if state.mid in self.blocked_mids:
                 continue
             a, b = PAIRS[state.mid]
             opponent = b if player == a else a
@@ -79,9 +87,13 @@ class CrashScheduler:
                     self.pending.discard(player)
                     self.faulty.discard(player)
                     return
+                idle_before = state.idle_reports
                 self.controller.send_locked(player, "RESTART")
             self.controller.log("RESTART", "INFO", f"#{number} P{player} after {delay:.2f}s")
-            self.controller.wait_for(lambda: self.controller.players[player].mode in ("IDLE", "END"))
+            self.controller.wait_for(
+                lambda: self.controller.players[player].idle_reports > idle_before
+                or self.controller.players[player].mode == "END"
+            )
             with self.controller.condition:
                 ended = self.controller.players[player].mode == "END"
                 self.pending.discard(player)
@@ -113,6 +125,7 @@ class CrashScheduler:
                     self.pending.discard(player)
                     continue
                 self.faulty.add(player)
+                self.blocked_mids.add(mid)
                 self.controller.send_locked(player, event.kind)
 
             self.controller.log(event.kind, "WARN", f"#{number} P{player} (PLAYING G{mid:02d})")
@@ -123,15 +136,15 @@ class CrashScheduler:
                 self.controller.log("QUIT_ACK", "INFO", f"#{number} P{player} reported QUIT")
                 return True
 
-            self.controller.wait_for(
-                lambda: self.controller.players[player].mode == "CRASHED"
-                and self.controller.players[player].mid == mid
-            )
-            self.controller.log("CRASH_ACK", "INFO", f"#{number} P{player} crashed in G{mid:02d}")
+            self.controller.wait_for(lambda: self.controller.players[player].mode == "CRASHED")
+            with self.controller.condition:
+                ack_mid = self.controller.players[player].mid
+                self.blocked_mids.add(ack_mid)
+            self.controller.log("CRASH_ACK", "INFO", f"#{number} P{player} crashed in G{ack_mid:02d}")
             delay = self.random.uniform(4, 5)
             thread = Thread(
                 target=self.restart_after_delay,
-                args=(number, player, mid, delay),
+                args=(number, player, ack_mid, delay),
                 name=f"Restart-P{player}-{number}",
             )
             thread.start()
@@ -150,13 +163,13 @@ class CrashScheduler:
         for thread in self.restart_threads:
             thread.join()
 
+        self.controller.wait_for(
+            lambda: all(state.mode == "END" for state in self.controller.players.values())
+        )
         crash_count = sum(event.kind == "CRASH" for event in self.events[:self.fired])
         quit_count = self.fired - crash_count
         self.controller.log(
             "SUMMARY", "INFO",
             f"fired {self.fired}/{len(self.events)} events: crash {crash_count}, quit {quit_count}",
-        )
-        self.controller.wait_for(
-            lambda: all(state.mode == "END" for state in self.controller.players.values())
         )
         self.controller.log("TERMINATE", "SUCCESS", "all players ended")

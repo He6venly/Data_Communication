@@ -10,6 +10,7 @@ class PlayerState:
     mode: str = "IDLE"
     mid: int | None = None
     idle_count: int = 0
+    idle_reports: int = 0
 
 
 class PlayerController:
@@ -56,6 +57,8 @@ class PlayerController:
             state = self.players[player]
             if mode == "IDLE" and state.mode == "PLAYING":
                 state.idle_count += 1
+            if mode == "IDLE":
+                state.idle_reports += 1
             state.mode = mode
             state.mid = mid
             self.condition.notify_all()
