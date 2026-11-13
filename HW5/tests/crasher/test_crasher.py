@@ -105,6 +105,16 @@ class CrasherTests(unittest.TestCase):
         scheduler.eligible_players()
         self.assertNotIn(40, scheduler.blocked_mids)
 
+    def test_opponent_missing_same_match_is_not_selected(self):
+        controller = FakeController()
+        scheduler = CrashScheduler(controller, 11)
+        controller.players[7].mode = "PLAYING"
+        controller.players[7].mid = 40
+        controller.players[9].mode = "IDLE"
+        controller.players[9].mid = None
+
+        self.assertNotIn(7, scheduler.eligible_players())
+
     def test_wait_all_players_end_then_summary(self):
         controller = FakeController()
         scheduler = CrashScheduler(controller, 11)
@@ -147,6 +157,27 @@ class CrasherTests(unittest.TestCase):
         self.assertIn(0, scheduler.blocked_mids)
         self.assertIn(9, scheduler.blocked_mids)
         self.assertIn("crashed in G09", controller.logs[1][2])
+
+    @patch("src.crasher.scheduler.time.sleep", return_value=None)
+    def test_end_before_crash_ack_does_not_wait_forever(self, _sleep):
+        controller = FakeController()
+        scheduler = CrashScheduler(controller, 11)
+        scheduler.random.choice = lambda players: 1
+        scheduler.random.uniform = lambda start, end: 0
+
+        def end_before_apply(player, command):
+            controller.commands.append((player, command))
+            for state in controller.players.values():
+                state.mode = "END"
+                state.mid = None
+            controller.condition.notify_all()
+
+        controller.send_locked = end_before_apply
+        self.assertFalse(scheduler.fire_event(1, CrashEvent("CRASH", 2)))
+        self.assertEqual(scheduler.fired, 0)
+        self.assertEqual(controller.logs, [])
+        self.assertNotIn(1, scheduler.faulty)
+        self.assertNotIn(1, scheduler.pending)
 
     @patch("src.crasher.scheduler.time.sleep", return_value=None)
     def test_restart_notices_fast_idle_then_playing(self, _sleep):

@@ -68,14 +68,31 @@ class CrashScheduler:
                 continue
             a, b = PAIRS[state.mid]
             opponent = b if player == a else a
-            if opponent not in self.faulty and opponent not in self.pending:
+            opponent_state = self.controller.players[opponent]
+            if (
+                opponent_state.mode == "PLAYING"
+                and opponent_state.mid == state.mid
+                and opponent not in self.faulty
+                and opponent not in self.pending
+            ):
                 result.append(player)
         return result
 
     # 선택 후 지연 동안 경기가 바뀌지 않았는지 다시 확인한다.
     def still_eligible(self, player: int, mid: int) -> bool:
         state = self.controller.players[player]
-        return state.mode == "PLAYING" and state.mid == mid and player in self.pending
+        a, b = PAIRS[mid]
+        opponent = b if player == a else a
+        opponent_state = self.controller.players[opponent]
+        return (
+            state.mode == "PLAYING"
+            and state.mid == mid
+            and player in self.pending
+            and opponent_state.mode == "PLAYING"
+            and opponent_state.mid == mid
+            and opponent not in self.faulty
+            and opponent not in self.pending
+        )
 
     # CRASH ACK부터 4~5초 뒤에 RESTART를 보내고 IDLE 복귀를 확인한다.
     def restart_after_delay(self, number: int, player: int, mid: int, delay: float) -> None:
@@ -128,18 +145,40 @@ class CrashScheduler:
                 self.blocked_mids.add(mid)
                 self.controller.send_locked(player, event.kind)
 
-            self.controller.log(event.kind, "WARN", f"#{number} P{player} (PLAYING G{mid:02d})")
-            self.fired += 1
-
             if event.kind == "QUIT":
                 self.controller.wait_for(lambda: self.controller.players[player].mode in ("QUIT", "END"))
+                with self.controller.condition:
+                    applied = self.controller.players[player].mode == "QUIT"
+                    if not applied:
+                        self.pending.discard(player)
+                        self.faulty.discard(player)
+                if not applied:
+                    if self.league_over():
+                        return False
+                    continue
+                self.controller.log(event.kind, "WARN", f"#{number} P{player} (PLAYING G{mid:02d})")
+                self.fired += 1
                 self.controller.log("QUIT_ACK", "INFO", f"#{number} P{player} reported QUIT")
                 return True
 
-            self.controller.wait_for(lambda: self.controller.players[player].mode == "CRASHED")
+            self.controller.wait_for(
+                lambda: self.controller.players[player].mode in ("CRASHED", "END")
+            )
             with self.controller.condition:
-                ack_mid = self.controller.players[player].mid
-                self.blocked_mids.add(ack_mid)
+                applied = self.controller.players[player].mode == "CRASHED"
+                if not applied:
+                    self.pending.discard(player)
+                    self.faulty.discard(player)
+                    ack_mid = None
+                else:
+                    ack_mid = self.controller.players[player].mid
+                    self.blocked_mids.add(ack_mid)
+            if not applied:
+                if self.league_over():
+                    return False
+                continue
+            self.controller.log(event.kind, "WARN", f"#{number} P{player} (PLAYING G{mid:02d})")
+            self.fired += 1
             self.controller.log("CRASH_ACK", "INFO", f"#{number} P{player} crashed in G{ack_mid:02d}")
             delay = self.random.uniform(4, 5)
             thread = Thread(
