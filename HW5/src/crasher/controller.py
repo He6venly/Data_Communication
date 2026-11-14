@@ -1,7 +1,8 @@
+import select
 import socket
 from dataclasses import dataclass
-from threading import Condition, Lock, Thread
-from typing import Callable
+from threading import Condition, Event, Lock, Thread
+from typing import Callable, Iterator
 
 
 @dataclass
@@ -11,6 +12,7 @@ class PlayerState:
     mid: int | None = None
     idle_count: int = 0
     idle_reports: int = 0
+    fault_ack: tuple[str, int | None] | None = None
 
 
 class PlayerController:
@@ -20,11 +22,11 @@ class PlayerController:
         self.condition = Condition(Lock())
         self.error: BaseException | None = None
         self.threads: list[Thread] = []
+        self.closing = Event()
 
     # 처음 받은 CTRL 줄에서 Player 번호를 확인한다.
     @staticmethod
-    def read_ctrl(stream) -> int:
-        raw = stream.readline()
+    def read_ctrl(raw: bytes) -> int:
         if not raw:
             raise ConnectionError("CTRL before connection closed")
         fields = raw.decode("ascii").split()
@@ -59,6 +61,8 @@ class PlayerController:
                 state.idle_count += 1
             if mode == "IDLE":
                 state.idle_reports += 1
+            if mode in ("CRASHED", "QUIT"):
+                state.fault_ack = (mode, mid)
             state.mode = mode
             state.mid = mid
             self.condition.notify_all()
@@ -70,33 +74,62 @@ class PlayerController:
                 self.error = error
             self.condition.notify_all()
 
+    # CTRL과 이후 STATE가 한 TCP 조각에 들어와도 같은 버퍼로 읽는다.
+    def read_lines(self, sock: socket.socket) -> Iterator[bytes]:
+        buffer = bytearray()
+        waiting_for_ctrl = True
+        while not self.closing.is_set():
+            if waiting_for_ctrl:
+                with self.condition:
+                    if self.error is not None:
+                        raise self.error
+            if not select.select([sock], [], [], 0.25)[0]:
+                continue
+            data = sock.recv(4096)
+            if not data:
+                return
+            buffer.extend(data)
+            while (end := buffer.find(b"\n")) != -1:
+                raw = bytes(buffer[:end])
+                del buffer[:end + 1]
+                waiting_for_ctrl = False
+                yield raw
+
     # 한 Player의 제어 연결에서 STATE 줄을 계속 읽는다.
-    def receive_states(self, player: int, stream) -> None:
+    def receive_states(self, player: int, lines: Iterator[bytes]) -> None:
         try:
-            while raw := stream.readline():
+            for raw in lines:
                 self.update_state(player, raw.decode("ascii").split())
+            with self.condition:
+                if self.players[player].mode != "END" and not self.closing.is_set():
+                    raise ConnectionError(f"P{player} control connection closed before END")
         except (OSError, UnicodeError, ValueError) as error:
-            self.record_error(error)
-        finally:
-            stream.close()
+            if not self.closing.is_set():
+                self.record_error(error)
 
     # 열 명의 Player가 접속할 때까지 기다린 뒤 상태 수신 Thread를 시작한다.
     def accept_players(self, listener: socket.socket) -> None:
+        listener.settimeout(0.25)
         while len(self.players) < 10:
-            sock, address = listener.accept()
-            stream = sock.makefile("rb")
+            with self.condition:
+                if self.error is not None:
+                    raise self.error
             try:
-                player = self.read_ctrl(stream)
+                sock, address = listener.accept()
+            except TimeoutError:
+                continue
+            try:
+                lines = self.read_lines(sock)
+                player = self.read_ctrl(next(lines, b""))
                 with self.condition:
                     if player in self.players:
                         raise ValueError(f"duplicate P{player}")
                     self.players[player] = PlayerState(sock)
                 self.log("CONNECT", "SUCCESS", f"P{player} from {address[0]}:{address[1]} ({len(self.players)}/10)")
-                thread = Thread(target=self.receive_states, args=(player, stream), name=f"Control-P{player}")
+                thread = Thread(target=self.receive_states, args=(player, lines), name=f"Control-P{player}")
                 thread.start()
                 self.threads.append(thread)
             except BaseException:
-                stream.close()
                 sock.close()
                 raise
 
@@ -123,6 +156,7 @@ class PlayerController:
 
     # 모든 제어 연결과 수신 Thread를 정리한다.
     def close(self) -> None:
+        self.closing.set()
         for state in self.players.values():
             try:
                 state.sock.shutdown(socket.SHUT_RDWR)

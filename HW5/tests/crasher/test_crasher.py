@@ -24,6 +24,7 @@ class FakeController:
         self.commands.append((player, command))
         if command == "CRASH":
             self.players[player].mode = "CRASHED"
+            self.players[player].fault_ack = ("CRASHED", self.players[player].mid)
         elif command == "RESTART":
             self.players[player].idle_reports += 1
             self.players[player].mode = "IDLE"
@@ -31,6 +32,7 @@ class FakeController:
         elif command == "QUIT":
             self.players[player].mode = "QUIT"
             self.players[player].mid = None
+            self.players[player].fault_ack = ("QUIT", None)
         self.condition.notify_all()
 
     def send(self, player, command):
@@ -60,7 +62,7 @@ class CrasherTests(unittest.TestCase):
         logs = []
         controller = PlayerController(lambda *parts: logs.append(parts))
         controller.players[3] = PlayerState(None)
-        self.assertEqual(controller.read_ctrl(io.BytesIO(b"CTRL P3\n")), 3)
+        self.assertEqual(controller.read_ctrl(b"CTRL P3"), 3)
 
         controller.update_state(3, ["STATE", "P3", "PLAYING", "18"])
         self.assertEqual((controller.players[3].mode, controller.players[3].mid), ("PLAYING", 18))
@@ -145,6 +147,7 @@ class CrasherTests(unittest.TestCase):
                 controller.commands.append((player, command))
                 controller.players[player].mode = "CRASHED"
                 controller.players[player].mid = 9
+                controller.players[player].fault_ack = ("CRASHED", 9)
                 controller.condition.notify_all()
             else:
                 original_send(player, command)
@@ -178,6 +181,73 @@ class CrasherTests(unittest.TestCase):
         self.assertEqual(controller.logs, [])
         self.assertNotIn(1, scheduler.faulty)
         self.assertNotIn(1, scheduler.pending)
+
+    @patch("src.crasher.scheduler.time.sleep", return_value=None)
+    def test_fault_ack_followed_by_end_still_counts_once(self, _sleep):
+        for kind, report, ack_message in (
+            ("CRASH", "CRASHED 9", "#1 P1 crashed in G09"),
+            ("QUIT", "QUIT", "#1 P1 reported QUIT"),
+        ):
+            with self.subTest(kind=kind):
+                logs = []
+                controller = PlayerController(lambda *parts: logs.append(parts))
+                controller.players = {player: PlayerState(None, "END") for player in range(1, 11)}
+                for player in (1, 2):
+                    controller.update_state(player, ["STATE", f"P{player}", "PLAYING", "0"])
+                scheduler = CrashScheduler(controller, 11)
+                scheduler.random.choice = lambda players: 1
+                wait_for = controller.wait_for
+
+                def receive_ack_and_end(predicate):
+                    reports = f"STATE P1 {report}\nSTATE P1 END\n".encode("ascii")
+                    controller.receive_states(1, io.BytesIO(reports))
+                    wait_for(predicate)
+
+                with (
+                    patch.object(controller, "send_locked") as send,
+                    patch.object(controller, "wait_for", side_effect=receive_ack_and_end),
+                ):
+                    self.assertTrue(scheduler.fire_event(1, CrashEvent(kind, 2)))
+                    send.assert_called_once_with(1, kind)
+                self.assertEqual(scheduler.fired, 1)
+                self.assertEqual(logs, [
+                    (kind, "WARN", "#1 P1 (PLAYING G00)"),
+                    (f"{kind}_ACK", "INFO", ack_message),
+                ])
+                self.assertEqual(scheduler.restart_threads, [])
+                self.assertNotIn(1, scheduler.pending)
+                self.assertNotIn(1, scheduler.faulty)
+
+    def test_eof_before_end_wakes_scheduler_and_fails(self):
+        logs = []
+        controller = PlayerController(lambda *parts: logs.append(parts))
+        controller.players = {player: PlayerState(None, "END") for player in range(1, 11)}
+        controller.update_state(1, ["STATE", "P1", "PLAYING", "0"])
+        scheduler = CrashScheduler(controller, 11)
+        scheduler.events = []
+        errors = []
+        waiting = threading.Event()
+        wait_for = controller.wait_for
+
+        def wait_for_end(predicate):
+            waiting.set()
+            wait_for(predicate)
+
+        def run():
+            try:
+                scheduler.run()
+            except ConnectionError as error:
+                errors.append(str(error))
+
+        with patch.object(controller, "wait_for", side_effect=wait_for_end):
+            thread = threading.Thread(target=run, daemon=True)
+            thread.start()
+            self.assertTrue(waiting.wait(1))
+            controller.receive_states(1, io.BytesIO())
+            thread.join(timeout=1)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(errors, ["P1 control connection closed before END"])
+        self.assertEqual(logs, [])
 
     @patch("src.crasher.scheduler.time.sleep", return_value=None)
     def test_restart_notices_fast_idle_then_playing(self, _sleep):
