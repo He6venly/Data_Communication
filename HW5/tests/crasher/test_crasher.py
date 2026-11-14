@@ -82,7 +82,12 @@ class CrasherTests(unittest.TestCase):
         self.assertIn(len(first.events), range(4, 8))
         quit_count = sum(event.kind == "QUIT" for event in first.events)
         self.assertIn(quit_count, (1, 2))
-        self.assertEqual([event.trigger for event in first.events], sorted(event.trigger for event in first.events))
+        for seed in (0, 1, 2, 11, 23, 37, 42):
+            with self.subTest(seed=seed):
+                plan = CrashScheduler(FakeController(), seed).events
+                for index, event in enumerate(plan):
+                    start = 2 + index * 3
+                    self.assertIn(event.trigger, range(start, start + 3))
 
     def test_player_with_quit_opponent_is_not_selected(self):
         controller = FakeController()

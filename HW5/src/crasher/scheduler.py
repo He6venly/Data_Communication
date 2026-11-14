@@ -30,10 +30,11 @@ class CrashScheduler:
     # seed를 이용해 장애 수, 종류, 발생 기준을 한 번만 만든다.
     def make_plan(self) -> list[CrashEvent]:
         count = self.random.randint(4, 7)
-        quit_count = self.random.randint(1, min(2, count))
+        quit_count = self.random.randint(1, 2)
         kinds = ["QUIT"] * quit_count + ["CRASH"] * (count - quit_count)
         self.random.shuffle(kinds)
-        triggers = sorted(self.random.sample(range(2, 31), count))
+        # 종료 경기 수는 근사값이라 후반에 멈출 수 있으므로 각 사건에 이른 구간을 배정한다.
+        triggers = [self.random.randint(start, start + 2) for start in range(2, 2 + 3 * count, 3)]
         return [CrashEvent(kind, trigger) for kind, trigger in zip(kinds, triggers)]
 
     # Crasher 로그 첫 줄에 사용할 전체 계획 문자열을 만든다.
