@@ -196,7 +196,7 @@ Run C hash·P8 부전패 개수·최종 전적은 매칭 순서에 따라 달라
 
 - C1. Player 10개의 CTRL 접속 대기. seed 생략 시 무작위이며 사용한 seed와 계획을 로그 첫 PLAN에 기록
 - C2. 장애 4–7건·quit 1–2건·나머지 crash, 종류 순서 무작위
-- C3. 종료 경기 수 기준은 2–30 안에서 사건 순서대로 2–4, 5–7, 8–10처럼 나눈 구간마다 무작위로 하나씩 고름. 장애로 PLAYING→IDLE 횟수÷2가 실제 종료 경기 수보다 작아질 수 있어 사건이 후반에 몰리는 것을 방지함. 전원이 END 또는 QUIT이면 사건 주입 대기를 끝냄
+- C3. 종료 경기 수 기준은 2–30 전체에서 중복 없이 무작위로 고른 뒤 작은 순서대로 적용함. 종료 경기 수는 PLAYING→IDLE 횟수÷2로 근사함. 전원이 END 또는 QUIT이면 사건 주입 대기를 끝냄. SUMMARY의 적용 건수와 계획 건수를 함께 확인함
 - C4. 현재 PLAYING이며 본인·상대가 장애 중이 아닌 선수 중 무작위 선택. crash·영구 quit·아직 적용되지 않은 명령 대기까지 장애 집합에 포함
 - C5. 대상 선택 후 0–0.3초 대기, 송신 직전 Lock 안에서 같은 경기·자격 재검사. 바뀌면 다시 선택
 - C6. `STATE Pk CRASHED mid` ACK 수신부터 무작위 4–5초 뒤 RESTART. 여러 crash의 복귀를 독립 예약하며 IDLE 확인 후 장애 집합에서 제거
@@ -212,7 +212,7 @@ Player는 MATCH에서 PLAYING 보고 후 대기 명령을 적용함. IDLE 중 �
 ### 종료 전적과 Run D 검증
 
 - Server는 전체 45경기로 standings를 만들고, TCP의 `LEAGUE_END rank pts`에는 순위·승점만 보냄. Player는 정상 처리한 MATCH_END마다 mid당 한 번 W/D/L을 집계함. QUIT한 Player는 `TERMINATE | WARN | left at Gxx`로 종료함.
-- QUIT하지 않은 Player는 9경기 결과를 처리하고 TERMINATE의 순위·승점·W/D/L을 standings와 대조함. Run D에서 crash로 결과를 버렸다면 수신한 순위·승점과 확인한 경기의 W/D/L을 기록하고 뒤에 `observed_only=yes missing=N`을 붙임. 이때 전체 전적은 standings를 기준으로 하고, Player 로그의 RESULT를 같은 mid의 Server 결과와 대조해 누락이 crash 구간으로 설명되는지 확인함. kit 예제도 P10의 Player 전적은 W2 D0 L5, 전체 전적은 W2 D0 L7임. TCP 필드를 추가하거나 누락된 W/D/L을 추정해 로그를 채우지 않음.
+- QUIT하지 않은 Player의 TERMINATE 순위·승점·W/D/L을 standings와 대조함. 제출 Run D는 직접 읽을 수 있는 `RunD_standings.txt`의 경로를 `--standings`로 지정함. crash로 결과를 놓친 Player는 BYE에서 게임·제어 연결을 닫고 최대 45초 동안 순위표 사본을 기다림. TCP에서 받은 순위·승점 및 확인한 경기와 일치하면 공식 전적을 기록하고 `source=standings missing=N`을 붙임. 대조 실패는 TERMINATE FAIL임. 개발 실행에서 경로를 생략하면 관측 전적에 `observed_only=yes missing=N`을 붙임.
 - QUIT하지 않은 Player가 순위를 받지 못하면 사유를 TERMINATE WARN으로 남기고 해당 실행은 검증 실패로 처리함. BYE가 먼저 와 Player의 REJOIN이 빠졌거나 보낸 장애 명령이 적용되지 않은 실행 역시 제출 기준 미달임. kit의 chaos PASS와 아래 종료 검사를 모두 충족한 실행만 제출함.
 
 ## 파일·필수 로그
@@ -274,10 +274,12 @@ python -m tools.launch_players --host SERVER_IP --port 9500 --config "KIT/4_conf
 
 python -m src.player --host SERVER_IP --port 9500 --id 3 --strategy MATCH --think 18,22 --run B --out "LOCAL_LOGS/run_B"
 python -m src.crasher --host 127.0.0.1 --port 9700 --run D --out "LOCAL_LOGS/run_D" --seed 11
-python -m tools.launch_players --host SERVER_IP --port 9500 --config "KIT/4_config/players_std.txt" --think 18,22 --run D --out "LOCAL_LOGS/run_D" --crasher 127.0.0.1:9700
+python -m tools.launch_players --host SERVER_IP --port 9500 --config "KIT/4_config/players_std.txt" --think 18,22 --run D --out "LOCAL_LOGS/run_D" --crasher 127.0.0.1:9700 --standings "LOCAL_LOGS/run_D/RunD_standings.txt"
 ```
 
 B/C/D는 Server의 `--tables 4`와 해당 Run·경로를 지정함. launcher는 kit의 `번호 전략 [고장]`을 읽어 Player 10개를 독립 프로세스로 실행하고, C의 고장 열을 `--fault 종류@mid,r`로 전달함. D는 Server·Crasher·Player 순으로 기동함. Run마다 새 폴더를 사용하고 Server·Player·Crasher 출력을 같은 Run 폴더에 모음.
+
+Run D의 원격 Server가 종료되면 launcher와 별도 터미널에서 `RunD_standings.txt`를 로컬 Run 폴더로 복사함. 임시 이름으로 받은 뒤 `--standings`에 지정한 이름으로 바꿔 복사 중인 파일을 Player가 읽지 않게 함. 나머지 Server 출력도 같은 폴더에 모음.
 
 1. 각 담당이 대역 검사와 kit로 자신의 프로그램을 확인함. bot 테스트는 kit 임시 사본의 mybots 어댑터로 `src.player.bots`를 연결함. 표준 41건 ALL PASS와 샘플·TEAM 기준 hash를 확인함.
 2. 실제 TCP를 로컬에서 샘플 설정으로 M=1·2·4에서 확인함. results `cfde2bce`·standings `c8a0c732`, overlap 0이 기준임. 정식 설정 A/B는 파일 바이트와 자체 기준 `5255a2bf`·`6a4147b7`을 대조함.

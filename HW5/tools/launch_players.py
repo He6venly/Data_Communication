@@ -46,7 +46,7 @@ def read_config(path: Path) -> list[PlayerConfig]:
 # 각 Player를 독립 프로세스로 실행할 명령 목록을 만든다.
 def build_commands(
     configs: list[PlayerConfig], host: str, port: int, think: str,
-    run_name: str, out: Path, crasher: str | None,
+    run_name: str, out: Path, crasher: str | None, standings: Path | None = None,
 ) -> list[list[str]]:
     commands = []
     for config in configs:
@@ -64,6 +64,8 @@ def build_commands(
             command.extend(("--fault", config.fault))
         if crasher:
             command.extend(("--crasher", crasher))
+        if standings is not None:
+            command.extend(("--standings", str(standings)))
         commands.append(command)
     return commands
 
@@ -114,6 +116,7 @@ def main() -> int:
     parser.add_argument("--run", choices=("A", "B", "C", "D"), required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--crasher")
+    parser.add_argument("--standings", type=Path, help="Run D final standings file")
     args = parser.parse_args()
     if not 0 <= args.port <= 65535:
         parser.error("--port must be between 0 and 65535")
@@ -121,6 +124,8 @@ def main() -> int:
         parser.error("Run D requires --crasher HOST:PORT")
     if args.run != "D" and args.crasher:
         parser.error("--crasher is only used for Run D")
+    if args.standings is not None and args.run != "D":
+        parser.error("--standings is only used for Run D")
 
     try:
         configs = read_config(args.config)
@@ -128,7 +133,7 @@ def main() -> int:
         parser.error(str(error))
     args.out.mkdir(parents=True, exist_ok=True)
     commands = build_commands(
-        configs, args.host, args.port, args.think, args.run, args.out, args.crasher,
+        configs, args.host, args.port, args.think, args.run, args.out, args.crasher, args.standings,
     )
     return launch(commands, Path(__file__).resolve().parents[1])
 

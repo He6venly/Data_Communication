@@ -1,3 +1,4 @@
+import os
 import select
 import socket
 from dataclasses import dataclass
@@ -199,6 +200,8 @@ def serve(config: ServerConfig) -> None:
             raise FileExistsError(f"output already exists: {path}")
 
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+        if os.name == "posix":
+            listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         listener.bind((config.host, config.port))
         listener.listen(len(PLAYERS))
         host, port = listener.getsockname()
