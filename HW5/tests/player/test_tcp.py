@@ -135,7 +135,8 @@ class TCPTests(unittest.TestCase):
                     if len(fields) == 3:
                         command += ["--fault", fields[2]]
                     if controller:
-                        command += ["--crasher", f"{controller.address[0]}:{controller.address[1]}"]
+                        command += ["--crasher", f"{controller.address[0]}:{controller.address[1]}",
+                                    "--standings", str(output / "RunD_standings.txt")]
                     children.append(subprocess.Popen(command, cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE))
                 deadline = time.monotonic()+90
                 for process in children:
@@ -159,26 +160,8 @@ class TCPTests(unittest.TestCase):
                     self.assertNotIn("| VERIFY | FAIL", player_log)
                     if controller and name == f"P{controller.quit}":
                         self.assertIn("left at", player_log.splitlines()[-1])
-                    elif controller and "observed_only=yes" in player_log.splitlines()[-1]:
-                        tail = player_log.splitlines()[-1]
-                        self.assertIn(f"rank={rank} pts={pts}", tail)
-                        observed = [0, 0, 0]
-                        mid_seen = set()
-                        for entry in player_log.splitlines():
-                            match = re.search(r"\| RESULT \| SUCCESS \| G(\d+) (\d+):(\d+) (\S+)", entry)
-                            if match:
-                                mid, sa, sb, outcome = match.groups()
-                                self.assertNotIn(mid, mid_seen)
-                                mid_seen.add(mid)
-                                if outcome == "DRAW":
-                                    observed[1] += 1
-                                else:
-                                    side = 0 if name in (output / f"Run{run}_results.txt").read_text().splitlines()[int(mid)].split()[1:2] else 1
-                                    scores = (int(sa), int(sb))
-                                    observed[0 if scores[side] > scores[1-side] else 2] += 1
-                        ow, od, ol = observed
-                        self.assertIn(f"W{ow} D{od} L{ol} observed_only=yes missing={9-len(mid_seen)}", tail)
                     elif run != "C" or name != "P8":
+                        self.assertIn("| TERMINATE | SUCCESS |", player_log.splitlines()[-1])
                         self.assertIn(f"rank={rank} pts={pts} W{w} D{d} L{l}", player_log.splitlines()[-1])
                     else:
                         self.assertIn("left at G21", player_log.splitlines()[-1])

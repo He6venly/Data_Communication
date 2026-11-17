@@ -107,7 +107,8 @@ class Player:
             if line is not None:
                 if getattr(self, "discard_partial", False):
                     self.discard_partial = False
-                    continue
+                    if line != "BYE":
+                        continue
                 return line
             ready, _, _ = select.select([self.sock, self.state.wake_read], [], [])
             if self.state.wake_read in ready:
@@ -256,6 +257,29 @@ class Player:
             raise ValueError(f"invalid {kind} fields")
         return True
 
+    def final_record(self, path):
+        # 원격 Server의 순위표 사본이 도착하면 TCP에서 받은 순위·승점과 대조함.
+        deadline = time.monotonic() + 45
+        while True:
+            try:
+                rows = path.read_text(encoding="ascii").splitlines()
+                break
+            except FileNotFoundError:
+                if time.monotonic() >= deadline:
+                    raise ValueError("standings not received after BYE")
+                time.sleep(0.1)
+        if len(rows) != 10:
+            raise ValueError("expected ten standings rows")
+        rank, name, w, d, l, pts, _, _ = rows[self.rank - 1].split()
+        record = (int(w), int(d), int(l))
+        if (
+            (int(rank), name, int(pts)) != (self.rank, f"P{self.args.id}", self.pts)
+            or sum(record) != 9 or 3 * record[0] + record[1] != self.pts
+            or any(total < known for total, known in zip(record, self.stats))
+        ):
+            raise ValueError("standings inconsistent with rank, points or observed results")
+        return record
+
     def run(self):
         # BYE까지 소켓을 유지하고 마지막 로그에 실제 종료 상태를 남겨줌
         try:
@@ -267,17 +291,22 @@ class Player:
                 self.state.mode = "END"
                 self.state.report()
             self.state.close()
+            self.sock.close()
             if self.state.quit_mid is not None:
                 self.log("TERMINATE", "WARN", f"left at G{self.state.quit_mid:02d} BYE received")
             elif self.rank is not None:
                 w, d, l = self.stats
                 missing = 9 - len(self.seen)
-                # 놓친 경기는 승점으로 추정하지 않고 직접 확인한 전적만 적어줌
                 extra = ""
                 status = "SUCCESS"
                 if self.args.run == "D" and missing:
-                    status = "WARN"
-                    extra = f" observed_only=yes missing={missing} (results discarded during crash)"
+                    standings = getattr(self.args, "standings", None)
+                    if standings is not None and not self.failed:
+                        w, d, l = self.final_record(standings)
+                        extra = f" source=standings missing={missing}"
+                    else:
+                        status = "WARN"
+                        extra = f" observed_only=yes missing={missing} (results discarded during crash)"
                 self.log("TERMINATE", "FAIL" if self.failed else status, f"rank={self.rank} pts={self.pts} W{w} D{d} L{l}{extra}")
             else:
                 self.log("TERMINATE", "WARN", "BYE received before league ranking")

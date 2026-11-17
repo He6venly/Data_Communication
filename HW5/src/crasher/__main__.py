@@ -2,12 +2,14 @@ import argparse
 import secrets
 import socket
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import Lock
 
 from .controller import PlayerController
 from .scheduler import CrashScheduler
+
+KST = timezone(timedelta(hours=9))
 
 
 class CrasherLog:
@@ -17,7 +19,7 @@ class CrasherLog:
 
     # 여러 Thread가 한 줄씩 섞이지 않도록 로그 쓰기를 보호한다.
     def __call__(self, event: str, status: str, message: str) -> None:
-        now = datetime.now()
+        now = datetime.now(KST)
         timestamp = now.strftime("%H:%M:%S.") + f"{now.microsecond // 1000:03d}"
         line = f"[{timestamp}] CRASHER | {event:<9} | {status:<7} | {message}\n"
         with self.lock:

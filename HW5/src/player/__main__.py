@@ -47,6 +47,7 @@ def parser():
     result.add_argument("--out", required=True, type=Path)
     result.add_argument("--fault", type=fault_type)
     result.add_argument("--crasher", type=address_type)
+    result.add_argument("--standings", type=Path, help="Run D final standings file")
     return result
 
 
@@ -60,6 +61,8 @@ def main(argv=None):
         cli.error("--fault is only available in Run C")
     if (args.crasher is not None) != (args.run == "D"):
         cli.error("--crasher is required only in Run D")
+    if args.standings is not None and args.run != "D":
+        cli.error("--standings is only available in Run D")
     log = None
     try:
         log = PlayerLog(args.out, args.run, args.id)

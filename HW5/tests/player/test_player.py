@@ -278,6 +278,17 @@ class ConfirmBoundaryTests(unittest.TestCase):
         with self.assertRaises(socket.timeout):
             peer.recv(1024)
 
+    def test_fragmented_bye_survives_restart_drain(self):
+        player, peer = self.prepare()
+        player.state.command("CRASH")
+        player.lines.buffer[:] = b"BY"
+        player.state.command("RESTART")
+        self.assertIsNone(player._recover())
+        self.assertEqual(peer.recv(1024), b"REJOIN P1\n")
+        peer.sendall(b"E\n")
+        peer.shutdown(socket.SHUT_WR)
+        self.assertEqual(player.read(), "BYE")
+
 
 class StateTests(unittest.TestCase):
     def setUp(self):
