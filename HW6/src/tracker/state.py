@@ -357,6 +357,15 @@ class TrackerState:
         with self.lock:
             return exit_code_locked(self, self._now())
 
+    def abort(self, reason: str) -> None:
+        """시그널·실행 오류를 첫 중단 사유로 기록하고 대기 지시를 정리함."""
+        if not isinstance(reason, str) or not reason:
+            raise ValueError("abort reason required")
+        with self.lock:
+            if self.frozen_report is None:
+                self.set_abort(reason, self._now())
+        self._flush()
+
     def snapshot(self) -> dict:
         """검사·상태 표시용 자료를 외부 변경이 불가능한 복사본으로 반환함."""
         with self.lock:
@@ -373,12 +382,13 @@ class TrackerState:
                 "upstat_at_rep": self.rep_stats, "crashes_sent": self.crashes_sent,
             })
 
-    def prepare_report(self) -> dict:
-        """종료 조건 충족 뒤 최종 report를 고정하고 이후 상태 변경을 차단함."""
+    def prepare_report(self, *, force: bool = False) -> dict:
+        """정상 종료 또는 강제 중단의 최종 report를 고정하고 변경을 차단함."""
         with self.lock:
             if self.frozen_report is None:
                 now = self._now()
-                if exit_code_locked(self, now) is None or self._inflight:
+                forced = force and self.terminal
+                if (not forced and exit_code_locked(self, now) is None) or self._inflight:
                     raise LifecycleError("tracker is not ready to finish", operation="prepare_report")
                 self.frozen_report = deepcopy(build_locked(self, now))
             result = deepcopy(self.frozen_report)

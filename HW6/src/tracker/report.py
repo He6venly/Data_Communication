@@ -32,7 +32,7 @@ def build_locked(state: TrackerState, now: float) -> dict:
         "T_dead": times(state.dead_times), "T_done": times(state.done_times),
         "T_last_done": round(max(state.done_times.values()), 2) if state.done_times else None,
         "T_alldone": round(state.alldone_at, 2) if state.alldone_at is not None else None,
-        "T_exit": round(state.elapsed(now), 2),
+        "T_exit": round(state.elapsed(now), 2) if state.started_at is not None else None,
         "done_kind": {p: d[0] for p, d in state.done.items()},
         "peers": {p: ("BYE" if p in state.byes else "DEAD" if p in state.dead else "LIVE")
                   for p in state.peers},
