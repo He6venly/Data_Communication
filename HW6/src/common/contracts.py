@@ -17,9 +17,12 @@ RejectReason: TypeAlias = Literal["STALE", "RELEASED", "CONSUMED"]
 
 
 class HW6Error(Exception):
+    """구성요소 사이에 오류 종류와 발생 위치를 전달함."""
+
     def __init__(
         self, message: str, *, operation: str = "", file: str | None = None
     ) -> None:
+        """오류 메시지·작업 종류·대상 파일을 함께 보관함."""
         super().__init__(message)
         self.operation = operation
         self.file = file
@@ -62,6 +65,8 @@ class ConnClosed(ConnectionError):
 
 
 class FileState(str, Enum):
+    """파일의 수신·검증·완료·유실 상태를 구분함."""
+
     DOWN = "DOWN"
     VERIFYING = "VERIFYING"
     SEED = "SEED"
@@ -71,6 +76,8 @@ class FileState(str, Enum):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Reservation:
+    """파일·청크·세대로 다운로드 예약을 식별함."""
+
     file: str
     idx: int
     generation: int
@@ -79,6 +86,8 @@ class Reservation:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class FileSnapshot:
+    """파일별 보유 상태와 전송 통계를 읽기 전용으로 전달함."""
+
     name: str
     size: int
     chunk_size: int
@@ -99,6 +108,8 @@ class FileSnapshot:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class StoreSnapshot:
+    """Peer 전체의 파일 상태와 누적 전송량을 전달함."""
+
     peer_id: str
     generation: int
     paused: bool
@@ -110,6 +121,8 @@ class StoreSnapshot:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class CommitResult:
+    """수신 반영 여부와 파일 완성 전환을 호출자에게 알림."""
+
     accepted: bool
     state: FileState
     complete_now: bool
@@ -118,6 +131,8 @@ class CommitResult:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class PeerView:
+    """상태판에 필요한 Peer 정보·속도·파일 상태를 전달함."""
+
     peer_id: str
     elapsed_sec: float
     online: bool
@@ -130,10 +145,14 @@ class PeerView:
 
 
 class EventSink(Protocol):
+    """구성요소의 이벤트를 같은 로그 작성자에게 전달하는 규약임."""
+
     def __call__(self, ev: str, **fields: JSONValue) -> None: ...
 
 
 class EventLogPort(Protocol):
+    """로그 기록·최근 이벤트 조회·종료의 공통 호출 규약임."""
+
     def __init__(
         self, *, peer_id: str, root: Path, started_at: float
     ) -> None: ...
@@ -146,6 +165,8 @@ class EventLogPort(Protocol):
 
 
 class StorePort(Protocol):
+    """Peer와 업로드 서버가 사용하는 저장소 호출 규약임."""
+
     def __init__(
         self, *, env: Env, peer_id: str, root: Path, emit: EventSink
     ) -> None: ...
@@ -176,6 +197,8 @@ class StorePort(Protocol):
 
 
 class UploadPort(Protocol):
+    """업로드 서버의 기동·가상 장애·종료 호출 규약임."""
+
     def __init__(
         self,
         *,
@@ -196,6 +219,8 @@ class UploadPort(Protocol):
 
 
 class ScreenPort(Protocol):
+    """복사본과 최근 이벤트로 상태판을 갱신하는 호출 규약임."""
+
     def __init__(
         self, *, stopping: Event, period_sec: float, stream: TextIO | None = None
     ) -> None: ...
