@@ -10,7 +10,7 @@
 
 | 담당·비율 | 소유 경로 | 작업 브랜치 기준 | 구현·검증 범위 |
 | --- | --- | --- | --- |
-| 안선효 40% | `src/common/transport.py`, `src/tracker/`, `tests/common/`, `tests/fixtures/transport.json`, `tests/tracker/`, `tests/integration/`, 개발·제출 문서 | `hw6/tracker` | 공통 Conn·공유 수신 사례, Tracker 전체, 명단·생존·지시·관찰·report, 실제 통합·VM 배포·7회 정합성·실측 분석·최종 취합 |
+| 안선효 40% | `src/common/`, `src/tracker/`, `tests/common/`, `tests/fixtures/transport.json`, `tests/tracker/`, `tests/integration/`, 개발·제출 문서 | `hw6/tracker` | 공유 자료형·예외·인터페이스, 공통 Conn·공유 수신 사례, Tracker 전체, 명단·생존·지시·관찰·report, 실제 통합·VM 배포·7회 정합성·실측 분석·최종 취합 |
 | 황대겸 30% | `src/peer/`, `tests/peer/` | `hw6/peer` | Peer 진입점·Tracker 연결·control, worker pool·청크/소스 선택·제한·재시도, crash/rejoin·STALLED·DONE·종료 조율 |
 | 황왕석 30% | `src/storage/`, `src/upload/`, `tools/`, `tests/storage/`, `tests/upload/`, `tests/tools/` | `hw6/storage-upload` | 파일·bitmap·해시·결과 저장, 업로드 서버·공유 UP 제한기, 화면, 실행·결과 보관·추가 검사 도구·시연 자료 |
 
@@ -91,7 +91,7 @@ Python 3.12 이상과 표준 라이브러리를 사용함. 기존 Python 과제 
 
 ### 구현할 파일 구성
 
-현재는 README와 Git 제외 설정만 있으며 아래 소스는 구현 전임. 실행 디렉터리는 `HW6/`, `src/`와 그 하위 폴더는 초기화 로직 없는 Python 네임스페이스 패키지로 구성함. 담당 내부의 파일 분리는 조정할 수 있으나 소유 경로와 공개 계약은 유지함.
+현재 제공된 코드는 `src/common/contracts.py`의 자료형·예외·Protocol뿐임. 아래 Conn·Tracker·Peer·저장소·업로드·도구는 구현 전임. 실행 디렉터리는 `HW6/`, `src/`와 그 하위 폴더는 초기화 로직 없는 Python 네임스페이스 패키지로 구성함. 담당 내부의 파일 분리는 조정할 수 있으나 소유 경로와 공개 계약은 유지함.
 
 ```text
 HW6/
@@ -99,7 +99,8 @@ HW6/
 ├── .gitignore
 ├── src/
 │   ├── common/                  안선효 40%, 세 소비자가 공유
-│   │   └── transport.py         Conn·ConnClosed·줄/정확한 바이트 수신
+│   │   ├── contracts.py         고정 자료형·예외·Protocol (제공됨)
+│   │   └── transport.py         Conn·줄/정확한 바이트 수신 (구현 대상)
 │   ├── tracker/                 안선효 40%
 │   │   ├── __main__.py          CLI·기동·종료
 │   │   ├── server.py            요청 처리·명단·공유 상태
@@ -140,26 +141,116 @@ HW6/
     └── tools/                   황왕석
 ```
 
-Tracker와 Peer는 `python -m src.tracker`, `python -m src.peer`로 실행함. 업로드·저장소는 Peer 프로세스 안에서 동작하며 별도 프로세스를 추가하지 않음. **Tracker·Peer·Upload 모두 `src.common.transport.Conn` 하나를 import함.** 공통화 범위는 바이트 송수신·연결 종료 예외로 한정하며 env·로그·Tracker/Peer 상태를 공통 모듈에 넣지 않음. 배포 lib를 활용할 때는 해당 담당 패키지 안에 필요한 파일과 출처·라이선스를 보존함. 실행에 필요한 원본 env·도구는 별도 키트 경로로 받음.
+Tracker와 Peer는 `python -m src.tracker`, `python -m src.peer`로 실행함. 업로드·저장소는 Peer 프로세스 안에서 동작하며 별도 프로세스를 추가하지 않음. **Tracker·Peer·Upload 모두 `src.common.transport.Conn` 하나를 import함.** 자료형·예외·Protocol은 모두 `src.common.contracts`를 import하고 각자 다시 정의하지 않음. 공통 모듈에 env 읽기·로그·Tracker/Peer 실행 로직을 넣지 않음. 배포 lib를 활용할 때는 해당 담당 패키지 안에 필요한 파일과 출처·라이선스를 보존함. 실행에 필요한 원본 env·도구는 별도 키트 경로로 받음.
 
-### Peer 내부 패키지 계약
+### 생성자·import·의존 방향
 
-Peer 진입점이 FileStore·UploadServer·화면을 생성하고 worker·control과 연결함. `src.peer`는 아래 공개 기능만 import하며, storage·upload는 `src.peer`나 Tracker 구현을 import하지 않음. 로그 발행 함수·종료 신호·설정·FileStore 객체는 생성 인자로 전달함. 대역 객체도 같은 계약을 사용함.
+아래 인자 이름·타입·기본값을 그대로 사용함. `*` 뒤 인자는 모두 keyword-only임. env는 JSON 원본 필드 이름을 유지한 Mapping이며, 각 담당이 만든 Config 객체나 필드명이 바뀐 dict를 넘기지 않음. root는 `Path.cwd().resolve()`인 절대 Path임. env dir가 상대 경로이면 root 기준, 절대 경로이면 그대로 사용하며 env 파일의 부모 폴더 기준으로 해석하지 않음. 구성요소는 받은 env를 변경하지 않음.
 
-| 제공자 | 공개 기능·입출력 | 책임 경계 |
+| 실제 구현 경로·클래스 | 고정 생성자 | 생성 시 동작 |
 | --- | --- | --- |
-| `src.storage.store.FileStore` | `snapshot()` → 파일별 메타정보·bitmap·상태·비원본 have·업로드 통계의 복사본 | 통계 단위는 바이트와 청크 수로 구분하며 snapshot 변경이 원본에 반영되지 않음 |
-| FileStore | `prepare_download(file)` → 파일 메타정보 | LIST 확인 뒤 받는 파일의 전체 크기 .part를 한 번 준비함. 재등록·재참가에서는 기존 데이터·bitmap을 초기화하지 않음 |
-| FileStore | `reserve(file, idx)` → 예약 토큰 또는 없음, `commit(token, data, src)` → 수신·검증 결과, `release(token)` | 중복 예약·크기·세대 검사, 위치 쓰기 후 bitmap 공개·RECV 기록, 마지막 청크 검증 1회. worker는 finally로 release함 |
-| FileStore | `read_chunk(file, idx)` → bytes 또는 NOFILE/NOCHUNK, `record_sent(file, idx, size)` | 보유 청크만 읽음. 전체 DATA 송신 성공 뒤에만 sent·distinct·바이트를 집계함 |
-| FileStore | `set_stalled(file, stalled)` | control이 계산한 유실 판정을 DOWN↔STALLED 전환으로 반영함. SEED·검증 중·FAILED 파일을 덮어쓰지 않음 |
-| FileStore | `pause()`·`resume()`·`finalize()` | pause는 새 예약·commit을 막고 진행 중 I/O를 정리함. resume은 새 세대를 시작함. finalize는 진행 작업이 끝난 뒤 결과 저장·핸들 해제를 수행함 |
-| `src.upload.server.UploadServer` | `start()`·`offline()`·`online()`·`stop(grace_sec)` | env 주소 bind, 연결당 handler, BITMAP/GET·UP 제한. offline은 listener·기존 연결을 닫고 반환하며 중복 호출을 허용함 |
-| `src.upload.screen.StatusScreen` | `start(snapshot, recent)`·`stop()` | 복사본·최근 이벤트만 읽고, 터미널일 때 고정 상태판과 흐르는 로그를 표시함 |
-| Peer 로그 발행 함수 | `emit(ev, **fields)` | 한 Peer의 구성요소 모두 같은 JSONL에 기록함. storage/upload는 상태 Lock을 놓은 뒤 호출함 |
-| `tools/` | CLI·파일·실제 자식 프로세스 | 구현 패키지를 import하지 않음. 기동 도구는 Python 실행 파일·env·Tracker IP/PORT·정책을 인자로 받음 |
+| `src.storage.store.FileStore` | `FileStore(*, env: Env, peer_id: str, root: Path, emit: EventSink)` | 설정을 보관함. 파일 I/O는 initialize에서 수행함 |
+| `src.upload.server.UploadServer` | `UploadServer(*, env: Env, peer_id: str, store: StorePort, stopping: Event, emit: EventSink)` | 저장소·신호·콜백을 보관함. bind·스레드 시작은 start에서 수행함 |
+| `src.upload.screen.StatusScreen` | `StatusScreen(*, stopping: Event, period_sec: float, stream: TextIO \| None = None)` | stream=None이면 sys.stdout. 스레드 시작은 start에서 수행함 |
+| `src.peer.log.EventLog` / `src.tracker.log.EventLog` | `EventLog(*, peer_id: str, root: Path, started_at: float)` | root/logs/id.jsonl을 열되 START/EXIT를 자동 생성하지 않음. tracker의 id는 소문자 tracker임 |
+| `src.common.transport.Conn` | `Conn(sock: socket.socket)` | 전달받은 연결의 버퍼만 생성함. connect·timeout 설정은 호출자가 수행함 |
 
-예약 토큰은 파일·idx·세대를 식별함. commit은 읽기 전용 결과로 `accepted`, `state`, `complete_now`를 반환하며, SHA-256을 통과해 SEED로 전환된 commit 하나만 complete_now=true임. Peer는 이때 해당 파일의 REGISTER를 시작하고 OK 뒤 COMPLETE를 한 번 기록함. 등록 응답을 받지 못하면 검증된 파일을 다시 받지 않고 등록만 재시도함. 자체 crash의 오래된 토큰은 accepted=false로 끝내고 상대 실패·BAN에 포함하지 않음. commit·finalize의 저장 오류는 정상 완료로 숨기지 않고 호출자에게 전달함.
+황대겸의 peer main이 FileStore·UploadServer·StatusScreen을 조립함. storage/upload는 peer나 tracker 구현을 역으로 import하지 않음. UploadServer는 생성자로 받은 StorePort만 호출함. 화면은 callback으로 받은 PeerView만 읽음. 자료형·Protocol을 제공한 것과 실제 클래스의 구현 완료를 구분함.
+
+```python
+# Peer 구성 예시. 실제 구성요소는 각 담당이 구현할 대상임.
+from pathlib import Path
+from threading import Event
+from src.storage.store import FileStore
+from src.upload.server import UploadServer
+from src.upload.screen import StatusScreen
+
+root = Path.cwd().resolve()
+stopping = Event()  # peer main만 set함. 하위 구성요소는 읽기만 함.
+store = FileStore(env=env, peer_id=peer_id, root=root, emit=log.event)
+store.initialize()  # log의 START 뒤, upload.start와 HELLO 앞
+upload = UploadServer(env=env, peer_id=peer_id, store=store,
+                      stopping=stopping, emit=log.event)
+screen = StatusScreen(stopping=stopping,
+                      period_sec=float(env["timing"]["status_every_sec"]))
+upload.start()
+screen.start(snapshot=build_peer_view, recent=log.recent)
+```
+
+### 반환 자료형·단위·스냅샷 구조
+
+정의는 제공된 `src/common/contracts.py`로 고정함. 아래 snapshot/result/token은 `frozen=True, slots=True, kw_only=True` dataclass임. dict·임의 객체·서로 다른 자체 dataclass로 바꾸지 않음. 중첩 목록도 tuple이므로 외부에서 저장소 상태를 변경할 수 없음. 모든 필드는 필수이고 생략 기본값이 없음.
+
+| 자료형 | 필드와 정확한 타입 |
+| --- | --- |
+| `Reservation` | `file:str`, `idx:int`, `generation:int`, `serial:int` |
+| `FileSnapshot` | `name:str`, `size:int`, `chunk_size:int`, `nchunks:int`, `origin:str`, `sha256:str`, `state:FileState`, `prepared:bool`, `bitmap:str`, `in_progress:tuple[int,...]`, `sent:int`, `distinct:int`, `sources:tuple[tuple[str,int],...]`, `received_bytes:int`, `sent_bytes:int`, `hash_failures:int` |
+| `StoreSnapshot` | `peer_id:str`, `generation:int`, `paused:bool`, `downloaded_have:int`, `received_bytes:int`, `sent_bytes:int`, `files:tuple[FileSnapshot,...]` |
+| `CommitResult` | `accepted:bool`, `state:FileState`, `complete_now:bool`, `reason:Literal["STALE","RELEASED","CONSUMED"] \| None` |
+| `PeerView` | `peer_id:str`, `elapsed_sec:float`, `online:bool`, `policy:Literal["random","rarest"]`, `up_kbps:int`, `down_kbps:int`, `actual_up_kbps:float`, `actual_down_kbps:float`, `files:tuple[FileSnapshot,...]` |
+
+`FileState`는 DOWN·VERIFYING·SEED·STALLED·FAILED 문자열 Enum임. VERIFYING은 해시 검사·rename 중의 내부 상태이며 화면에서는 DOWN으로 표시하고 DONE 대상에서 제외함. 로그·JSON에는 `.value`를 사용함. bitmap은 nchunks 길이의 0/1 문자열, in_progress는 정렬된 예약 idx tuple, sources는 피어 id 순으로 정렬한 `(src, 청크 수)` tuple임. FILES 순서는 env.files 순서를 유지함. 호출자는 `{f.name: f for f in snap.files}`로 이름별 조회함.
+
+`downloaded_have`는 snapshot.files에서 origin≠내 id인 파일의 bitmap 1 개수 합임. 원본은 제외하며 hash 재시도 시 줄어들 수 있음. received_bytes/sent_bytes는 실제 수신 commit/전체 송신 성공의 누적 바이트이며 원본 크기를 더하지 않음. hash 재시도·crash 때 누적 바이트를 0으로 되돌리지 않음. sources는 현재 파일 수신 시도의 출처 수이며 CORRUPT 재수신 때 초기화함. sent는 전체 송신한 청크 횟수, distinct는 보낸 서로 다른 idx 수임. 크기·바이트·청크 수는 int, 경과 시간은 초 float, 속도는 KB/s이며 1 KB=1,024 B임. EXIT up_mb/down_mb는 누적 바이트÷2^20임.
+
+snapshot의 파일별 복사본과 downloaded_have·바이트 합은 같은 세대·같은 복사본에서 계산함. 스냅샷 생성 중 I/O를 하지 않으며 호출자가 내부 Lock을 잡지 않음. 상태판의 실제 속도는 황대겸이 누적 바이트 차이/경과 시간/1,024로 계산해 PeerView에 넣음. 화면 담당이 별도 전송 통계나 단위 변환을 추측하지 않음.
+
+### FileStore·업로드·로그 메서드 계약
+
+| 공개 메서드 | 반환값·동작 |
+| --- | --- |
+| `initialize() -> None` | 원본 검증·메타정보를 준비함. 원본은 SEED·전부 1·prepared=True, 그 외는 DOWN·전부 0·prepared=False임. generation=0·paused=False로 시작함. 실패 시 열었던 핸들을 자체 정리하고 초기화 성공으로 표시하지 않음 |
+| `snapshot() -> StoreSnapshot` | 초기화 후 사용함. finalize 뒤에도 마지막 스냅샷 조회 가능함 |
+| `prepare_download(file:str) -> FileSnapshot` | 전체 크기 .part를 최초 한 번 준비함. 동일 파일 재호출·원본·완성 파일은 기존 상태를 반환하고 초기화하지 않음 |
+| `reserve(file:str, idx:int) -> Reservation \| None` | prepared·DOWN·미보유·미예약·online일 때만 토큰 반환. 후보 불가·paused는 None이며 실패/BAN이 아님. serial은 이 FileStore에서 재사용하지 않는 정수임 |
+| `commit(token:Reservation, data:bytes, src:str) -> CommitResult` | 크기·토큰을 확인해 위치 쓰기→bitmap→RECV를 수행함. 성공은 accepted=True·reason=None이며 해시 재시도로 DOWN/FAILED가 되어도 해당 commit 자체는 성공임. 마지막 성공 해시를 처리한 호출 하나만 complete_now=True임 |
+| `release(token:Reservation) -> None` | finally에서 호출함. 성공·실패·이전 세대·이미 release·finalize 뒤 모두 안전한 반복 호출임. 다른 토큰의 예약을 지우지 않음 |
+| `read_chunk(file:str, idx:int) -> bytes` | 정확히 clen(idx) 바이트. 모르는 파일은 NoFileError, 정상 idx의 미보유/미준비는 NoChunkError, paused는 OfflineError임. 에러 문자열·빈 bytes로 대신하지 않음 |
+| `record_sent(file:str, idx:int, size:int) -> None` | DATA 전체 송신 성공 후 호출. size=clen(idx) 확인 뒤 누적 통계를 반영함. 실제 송신이 끝났다면 pause 직후라도 집계함 |
+| `set_stalled(file:str, stalled:bool) -> bool` | DOWN↔STALLED가 실제 전환된 경우 True, 변화 없음/SEED/VERIFYING/FAILED면 False. control은 True일 때만 STALLED/UNSTALLED를 기록함 |
+| `pause() -> None`, `resume() -> None` | 첫 pause가 세대를 1 증가시키고 예약을 무효화함. 새 commit을 차단·진행 중 I/O를 정리함. 반복 pause는 세대를 추가 증가시키지 않음. resume은 그 새 세대를 online으로 열며 데이터·bitmap·누적 통계를 유지함 |
+| `finalize() -> StoreSnapshot` | 모든 생산 스레드 종료 뒤 결과를 저장하고 핸들을 닫음. paused=True의 마지막 스냅샷을 반환함. LIST 대기 등으로 아직 prepare하지 않은 파일도 bitmap·필요한 lost/0으로 채운 incomplete를 남김. 성공 뒤 반복 호출은 같은 스냅샷이며 I/O를 반복하지 않음. snapshot/finalize/release 외 호출은 이후 LifecycleError임 |
+| `UploadServer.start() -> None` | bind·listen 성공 후 반환함. 실행 중 재호출은 no-op. initialize 완료된 FileStore를 요구함 |
+| `offline() -> None`, `online() -> None` | offline은 listener·기존 연결을 닫고 세대를 무효화함. online은 start 이후의 재바인드임. 반복 호출은 no-op이며 이전 handler가 새 세대에서 DATA를 보내지 못함. 최종 stop 뒤 online은 LifecycleError임 |
+| `stop(grace_sec:float=3.0) -> None` | 신규 연결을 막고 진행 업로드를 0~3초 유예 후 강제로 연결을 닫음. 그 뒤 최장 5초의 join 예산으로 listener/handler 종료를 확인하며 남으면 ShutdownError임. stopping Event를 임의로 set하지 않음 |
+| `StatusScreen.start(snapshot:Callable[[],PeerView], recent:Callable[[int],tuple[str,...]]) -> None` | 데이터 자체가 아닌 두 공급 함수를 받음. period_sec마다 호출하여 표시하며, recent(n)으로 최근 n줄을 얻음. repeat start는 no-op임 |
+| `StatusScreen.stop() -> None` | 반복 가능함. 화면 스레드를 최대 5초 내 join하고 남으면 ShutdownError임. 공급 함수는 메모리 복사만 하고 네트워크/파일 I/O를 하지 않음 |
+| `EventLog.event(ev:str, **fields:JSONValue) -> None`, `recent(n:int=5) -> tuple[str,...]`, `close() -> None` | event가 파일·flush·최근 버퍼를 함께 처리함. recent는 시간순 복사본, close는 반복 가능함. close/EXIT 이후 event는 LifecycleError임. kwargs에 t·peer·ev를 덮어쓰지 않음 |
+
+같은 인자로 initialize/start를 반복 성공 호출해도 중복 파일 초기화·스레드 생성을 하지 않음. initialize 전의 데이터 메서드와 finalize/최종 stop 이후 재초기화는 LifecycleError임. 원본 검증으로 initialize가 실패한 경우 main은 finalize를 호출하지 않고 EXIT 1로 정리함. 인자의 잘못된 타입은 TypeError, idx/본문 크기 등 청크 계약 위반은 InvalidChunkError임. `commit`의 거절 판정 우선순위는 STALE→RELEASED→CONSUMED이며 accepted=False·complete_now=False·현재 파일 state를 반환하고 RECV·have·출처·바이트를 늘리지 않음. 이 세 결과는 상대 FAIL/BAN이 아님. 발급되지 않은 토큰은 InvalidChunkError임. worker는 반환값과 관계없이 finally로 release함.
+
+FileStore는 emit을 상태 Lock 밖에서 호출하고 마지막 청크의 RECV→HASH 순서를 보장함. 자료형 객체를 이벤트 값으로 직접 넘기지 않고 bool/int/float/str/list/dict/null의 JSON 값으로 바꿔 넘김. COMPLETE sources는 `dict(file_snapshot.sources)`임. registered_files는 Peer가 관리하여 SEED지만 REGISTER OK를 받지 못한 파일이 있으면 DONE을 보류하고 등록만 재시도함.
+
+### 예외·프로토콜 응답·프로세스 종료 대응
+
+아래 예외는 모두 공유 파일에서 import함. HW6Error 계열은 `Error(message:str, *, operation:str="", file:str|None=None)` 형식이며 operation/file 속성을 보존함. 문자열 메시지를 비교하여 분기하지 않음. ConnClosed는 ConnectionError의 하위 클래스이며 transport 모듈에서도 같은 클래스를 재노출함.
+
+| 예외·상황 | 처리 담당·고정 대응 |
+| --- | --- |
+| `ConfigurationError` | 각 main. env·CLI·초기 원본 검증 오류로 exit 1 |
+| `NoFileError` | Upload handler는 ERR NOFILE로 응답하고 같은 연결을 계속 처리함 |
+| `NoChunkError` | Upload handler는 ERR NOCHUNK로 응답하고 같은 연결을 계속 처리함 |
+| `InvalidChunkError` | Upload의 GET idx 형식·범위 오류는 ERR BADCMD. Peer가 받은 DATA의 idx/len 오류는 commit 전 FAIL·연결 폐기·예약 해제. FileStore에 잘못된 인자를 넘긴 로컬 오류는 ERROR kind=contract로 실패 종료함 |
+| `OfflineError` | Upload는 응답을 보내지 않고 연결을 닫음. crash 중 ERR를 송신하지 않음 |
+| `ConnClosed`, `TimeoutError`, 네트워크 `OSError` | worker의 실제 원격 요청 실패이면 FAIL·해당 연결 폐기·예약 해제·BAN 집계. 자체 crash/stopping 취소는 집계에서 제외함. TrackerLink는 연결을 새로 열고 tracker_lost를 별도로 판정함 |
+| `StoreIOError` | 로컬 I/O 오류를 상대 FAIL/BAN으로 돌리지 않음. main에 전달하고 ERROR kind=local_io·정리·EXIT 2로 끝냄. `.corrupt`는 I/O 실패가 아닌 해시 2회 불일치 때만 사용함 |
+| `LifecycleError`, `ShutdownError`, 잘못된 로컬 타입 | 숨기거나 PASS로 처리하지 않음. ERROR kind=contract 또는 shutdown·EXIT 2로 인계함. destroy 자체가 성공한 EXIT 3과 정리 실패 EXIT 2를 구분함 |
+
+로컬 실패용 ERROR는 추가 이벤트이며 `kind,operation,file,message`를 기록함(file이 없으면 null). Tracker로 보내는 ABORT reason이나 과제 필수 메시지 형식은 바꾸지 않음. 내부 예외는 emit·실패 큐/공유 상태로 peer main에 전달하고 worker/handler 안에서 조용히 소멸시키지 않음. 실제 클래스는 위 Protocol과 서명을 맞춤. FileStore/UploadServer/StatusScreen은 생성 시 I/O·네트워크·스레드를 시작하지 않으며, EventLog의 명시적인 로그 파일 열기만 생성자 I/O 예외임.
+
+### 도구의 CLI·결과 인계 계약
+
+tools는 `HW6/`에서 `python -m tools.이름`으로 실행하고 구현 패키지의 내부 객체를 import하지 않음. 아래 대문자 자리표시자는 실제 경로·주소로 바꿈. 경로는 공백을 포함할 수 있으므로 subprocess는 shell 문자열 대신 argv 목록을 사용함.
+
+| 도구·고정 CLI | 동작·성공/실패 기준 |
+| --- | --- |
+| `python -m tools.launch_peers --env ENV [--python EXE] [--policy random\|rarest] TRACKER_IP PORT` | EXE 기본값은 sys.executable. env의 각 id로 `EXE -m src.peer --env ENV --id ID [--policy POLICY] IP PORT`를 실행함. VM Tracker는 별도로 먼저 기동함. 희생자 3·생존자 0이면 도구 0, 다른 종료 코드는 도구 1임. CLI 오류는 1이고 C3 정책 누락을 자식 기동 전에 거부함 |
+| `python -m tools.collect_run --env ENV --kit KIT --run-name RUN [--runs-dir runs]` | KIT는 Python 키트 경로. 현재 폴더의 VM 로그·report 존재를 확인하고 `sys.executable KIT/tools/verify.py --env ENV`를 실행하여 출력 전체를 verify.txt에 저장함. 공식 verify와 추가 정합성이 통과하면 logs·report·verify·p1~p4의 bitmap/lost만 runs/RUN에 복사함. 원래 데이터는 삭제하지 않음 |
+| `python -m tools.check_run --env ENV --run-dir RUN_DIR [--policy random\|rarest]` | 기록 파일만 읽어 5개 로그·필수 이벤트/필드·EXIT·시각·희생자 포함 bitmap/lost·속도·정책·report를 검사함. C3는 policy 명시 필수. 통과 0, 미달/누락/형식 오류 1임. 큰 데이터가 없는 보관 폴더의 검사를 공식 verify 재실행으로 표현하지 않음 |
+
+RUN은 DEV·A·B·C1·C2·C3_random·C3_rarest 중 하나이며 env.name·C3 정책과 대조함. 이미 있는 runs/RUN을 덮어쓰지 않고 exit 1로 끝냄. 실패 출력은 verify.txt에 보존하되 정상 제출 Run으로 보관하지 않음. launch_peers 자동 검사에서는 자식 stdout을 버려 상태판을 끄고 stderr는 사용자가 확인할 수 있게 유지함. 시연은 별도 터미널 4개에서 Peer를 직접 실행하여 ASCII 화면을 확인함.
+
+각 담당은 자기 브랜치에 자기 소유 경로만 인계함. `src/common/contracts.py`는 세 브랜치가 같은 정의를 사용하고, 전달물에 같은 이름의 복제 contracts/transport나 다른 버전의 공통 타입을 포함하지 않음. 안선효는 공통 코드 기준을 먼저 맞춘 뒤 storage/upload와 peer를 조립하며, 기존 문서나 다른 조원의 파일을 덮어쓰는 폴더 전체 교체를 하지 않음.
 
 FileStore는 commit의 디스크 기록·bitmap 갱신 직후 RECV를 기록하고, 마지막 청크라면 그 뒤 HASH·필요한 CORRUPT를 기록함. worker는 src를 전달하고 RECV를 중복 기록하지 않음. COMPLETE·제어 이벤트는 Peer가 기록함. 업로드는 전체 송신 성공 통계만 집계하며 **SEND 로그를 남기지 않음**. 출처는 수신자의 RECV.src로 분석함(PPT p.182). 복사본을 얻은 뒤 reserve가 실패하면 다른 후보를 다시 고름. 파일 bitmap·fd·mmap·내부 Lock을 다른 패키지에서 직접 읽거나 변경하지 않음.
 
@@ -167,7 +258,7 @@ FileStore는 commit의 디스크 기록·bitmap 갱신 직후 RECV를 기록하�
 
 안선효가 `src/common/transport.py`와 `tests/fixtures/transport.json`을 단독 소유함. Tracker·Peer·Upload에 별도 transport.py나 Conn 사본을 만들지 않음. 공통 모듈은 다른 구현 패키지를 import하지 않으며 각 담당의 명령 처리·응답 검증은 자기 패키지에서 검사함. 공통 Conn·공유 사례를 먼저 제공하고 상대 구현을 기다리는 동안은 같은 공개 API의 대역을 사용함.
 
-`Conn(sock)`은 소켓당 하나의 rbuf를 소유함. `read_line()`은 LF까지 소비하고 LF를 뺀 UTF-8 문자열, `read_exact(n)`은 버퍼의 남은 바이트부터 정확히 n바이트를 반환함. `send_line(text)`는 UTF-8+LF, `send_all(data)`는 헤더·바이너리의 전부 송신, `close()`는 대기 중 I/O를 깨우는 종료를 담당함. 불완전한 줄·본문의 EOF는 ConnClosed, 시간 초과는 TimeoutError로 전달하며 짧은 본문을 성공으로 돌려주지 않음. `n=0`은 빈 bytes임. timeout·연결 재수립·DATA idx/len·LIST/PEERS 후속 줄 수 검증은 호출자의 책임임.
+서명은 `read_line() -> str`, `read_exact(n:int) -> bytes`, `send_line(text:str) -> None`, `send_all(data:bytes) -> None`, `close() -> None`임. Conn(sock)은 소켓당 하나의 rbuf를 소유함. read_line은 LF까지 소비하고 LF를 뺀 UTF-8 문자열, read_exact는 버퍼의 남은 바이트부터 정확히 n바이트를 반환함. send_line은 UTF-8+LF, send_all은 헤더·바이너리의 전부 송신, close는 대기 중 I/O를 깨우는 종료를 담당하며 반복 가능함. 불완전한 줄·본문의 EOF는 공통 contracts의 ConnClosed, 시간 초과는 TimeoutError로 전달하며 짧은 본문을 성공으로 돌려주지 않음. n=0은 빈 bytes임. timeout·연결 재수립·DATA idx/len·LIST/PEERS 후속 줄 수 검증은 호출자의 책임임. 중간 응답에서 timeout/EOF가 나면 그 연결을 폐기하고 새 연결에서 요청 전체를 다시 시작함.
 
 공유 JSON은 사례 id, 수신 조각의 16진수 배열, 호출 순서, 기대 반환값·예외로 구성하는 계약임. 아래 입력을 세 담당이 동일하게 사용하며, 표는 구현 전 검사 기준이고 실행 PASS가 아님.
 
@@ -244,6 +335,7 @@ PEERS는 연결에서 본 공인 IP가 아닌 env의 host를 반환함. 자기 i
 | Tracker·안선효 | JOIN(`id,n,src_ip`), REGISTER(`id,file`), REJOIN/BACK/BYE(`id`), CMD_DELIVERED/CMD_DROPPED(`id,cmd`), REPLICATED(`file,t_start,upstat,progress`), ALL_REPLICATED(`t_start,p_rep`), DONE(`id,kind,detail`), UNDONE(`id`), ABORT(`reason,progress`) |
 | Peer·황대겸 | GET(`file,chunks`), FAIL(`file,idx,src,err`), BAN(`target,sec`), COMPLETE(`file,sec,sources`), UNSTALLED(`file`), UNDONE(추가 필드 없음), ALLDONE(`done,alive`), ABORT(`reason,silent_sec`) |
 | FileStore·황왕석 | HASH(`file,ok,sec`), CORRUPT(`file,action,tries`). action은 redownload 또는 give_up임. COMPLETE용 파일별 출처 통계도 제공함 |
+| 각 main·실패 구성요소 | ERROR(`kind,operation,file,message`). local_io·contract·shutdown 실패를 기존 ABORT 사유와 구분하는 팀 추가 이벤트임 |
 
 황대겸이 생성한 Peer emit 하나를 FileStore·UploadServer에 주입하고, 저장소·업로드가 별도 로그나 EXIT를 쓰지 않음. 업로드 청크별 SEND 이벤트는 만들지 않음. 한 줄 UTF-8 JSON 객체·즉시 flush·숫자/불리언 타입을 지키며 ASCII 막대·색 코드·사람용 문장은 파일에 넣지 않음. 대상 피어에 예약 필드 t·peer·ev를 재사용하지 않음. 사용하는 이벤트는 위 표와 AllDefinedLogs.txt를 함께 맞춤.
 
@@ -313,12 +405,57 @@ report는 UTF-8 객체 하나·들여쓰기 2칸·시각 소수 둘째자리로 
 
 ## 독립 개발과 통합 순서
 
+### 조원별 작업 시작
+
+조원은 이 README에서 자기 이름의 소유 경로·공개 계약·통과 기준을 읽고 기존 작업 폴더에서 해당 브랜치 작업을 시작함. 공통 contracts를 먼저 import하며 이름·필드·반환형·예외 클래스를 다시 만들지 않음. Protocol 상속은 필수가 아니지만 메서드 서명과 실제 반환 객체는 반드시 같아야 함. import 단계에서 소켓·파일·스레드를 시작하지 않고 main 또는 명시적 initialize/start에서만 시작함.
+
+각 담당의 첫 검사는 다음과 같음. 아래 명령은 해당 테스트를 구현한 뒤 실행하며 현재 테스트가 존재한다는 뜻은 아님. 대역 테스트는 실제 클래스를 같은 API로 교체할 수 있도록 구성함.
+
+| 담당 | 첫 구현·검사 | 독립 검사 명령 |
+| --- | --- | --- |
+| 안선효 | common Conn·공유 입력 → Tracker, contracts와 서명 일치 | `python -m unittest discover -s tests/common -v`, `python -m unittest discover -s tests/tracker -v` |
+| 황대겸 | EventLog·CLI → 대역 StorePort/UploadPort → control·worker | `python -m unittest discover -s tests/peer -v` |
+| 황왕석 | FileStore와 공개 반환형 → UploadServer → StatusScreen·도구 | `python -m unittest discover -s tests/storage -v`, `python -m unittest discover -s tests/upload -v`, `python -m unittest discover -s tests/tools -v` |
+
+최종 인계는 자기 소유 소스·필요한 lib·테스트·실제 사용한 이벤트 정의·실행한 검사 명령과 결과로 구성함. 테스트 0건·필수 skip·대역 검사만으로 실제 통합 통과를 보고하지 않음. 새 의존성·포트·공통 객체의 필드를 임의로 추가하지 않음. 공개 계약을 바꿔야 하면 contracts·README·호출부·대역·검사를 같은 변경으로 맞춤.
+
+### 통합자의 결합 순서
+
 1. 세 담당이 TCP·CLI·FileStore/UploadServer 계약을 기준으로 자기 대역과 소규모 데이터를 준비함. Tracker는 대역 Peer, Peer는 대역 Tracker·FileStore·UploadServer, storage/upload는 대역 다운로드 클라이언트를 사용하여 상대 코드 없이 검증함.
 2. 황대겸·황왕석이 실제 FileStore/UploadServer를 Peer 진입점에 조립하고 단일 소스→다중 소스→8 worker를 확인함. 안선효는 동시에 Tracker의 관찰·지시·종료를 독립 검사함.
 3. 안선효가 실제 Tracker 1개와 Peer 4개를 독립 프로세스로 연결함. 로컬 DEV에서 해시·부분 재공유·속도·crash·종료·공식 verify를 확인한 뒤 A·B·C1·C2·C3의 조건을 검사함.
 4. VM Tracker DEV를 통과한 뒤 제출 7회를 하나씩 실행함. 황왕석의 도구로 로그·report를 취합하고 원래 데이터가 있는 실행 폴더에서 공식 verify를 수행한 다음 결과 기록을 보관함. 각 담당이 자기 로그·오류를 대조하고 안선효가 통합 정합성과 실측 분석을 확정함.
 
 시나리오는 동시에 돌리지 않음. 대역 테스트 통과와 실제 통합·원격 실행 통과를 구분함. C3 추가 2–3회는 권장 분석이며 필수 7회와 구분함.
+
+### crash·복귀·최종 종료 호출 순서
+
+| 상황·조율 담당 | 고정 순서와 하위 구성요소 책임 |
+| --- | --- |
+| 최초 기동·황대겸 | EventLog → START → FileStore.initialize → UploadServer.start → HELLO·REGISTER/LIST/HAVE → 화면·control·worker. StorePort/UploadPort를 main에서 한 번씩 생성함 |
+| crash 진입·황대겸 | Peer의 online을 false로 바꿔 신규 요청 차단 → FileStore.pause로 예약/commit 무효화 → UploadServer.offline과 다운로드/Tracker 연결 닫기 → CRASH. stopping Event는 set하지 않음. 닫힌 연결의 송신 오류는 자체 취소로 분류함 |
+| crash 복귀·황대겸 | 지시된 침묵 시간 경과 → FileStore.resume → UploadServer.online → HELLO·완성 파일 REGISTER·HAVE 재등록 → 즉시 캐시 갱신 → zero_since 초기화 → online·REJOIN. 복귀 절차 자체의 등록 통신은 허용하되 worker·평상시 control은 준비 완료 전 요청을 보내지 않음 |
+| 정상·ABORT·황대겸 | 새 다운로드 예약 차단·stopping.set → UploadServer.stop(3.0)로 진행 업로드 마무리/강제 종료 → worker·control join → FileStore.finalize → 필요한 BYE → StatusScreen.stop → EXIT → EventLog.close. 업로드 유예가 끝나기 전 FileStore.pause/finalize로 읽기 핸들을 닫지 않음 |
+| destroy·황대겸 | online=false → DESTROY → stopping.set → UploadServer.stop(0.0)·다운로드/Tracker 연결 닫기 → worker·control join → FileStore.finalize → 화면 stop → EXIT 3·close. BYE·재참가 없음 |
+
+control이나 handler가 자신을 join하거나 finalize를 직접 호출하지 않음. 상태 전환 요청만 main에 전달하고 main이 단일 정리 절차를 수행함. 정상 종료를 위해 이미 진행 중인 업로드가 stopping만 보고 즉시 버려지지 않게 하되 새 GET은 받지 않음. uploader stop은 파일 읽기 사용자가 모두 끝났음을 보장해야 함. 종료 대기 실패·저장 실패가 있으면 정상 PASS로 마감하지 않으며 ERROR와 비정상 종료를 남김.
+
+### 통합 인수 검사
+
+안선효가 `tests/integration/test_interfaces.py`에 아래 실제 클래스 검사를 구현하고 `python -m unittest discover -s tests/integration -v`로 실행함. 생성자/메서드 서명 검사에서 그치지 않고 반환 객체·로그·파일·상태 전이를 함께 확인함. 개인 구현의 내부 fd/Lock/자료구조에 의존하지 않음.
+
+| 검사 | 공통 입력·기대 결과 |
+| --- | --- |
+| 생성·import·의존 | 세 실제 클래스가 고정 keyword 인자로 생성됨. import/생성자에서 불필요한 bind·스레드·파일 초기화 없음. 공통 dataclass·예외 객체를 그대로 사용함 |
+| snapshot·부분 재공유 | 원본 없는 P4, 파일 내용 `b"abcdefghijk"`, size=11·chunk=8·원본 P1·SHA-256은 이 바이트에서 계산한 env 사용. prepare 뒤 idx0의 8 B commit → bitmap="10", downloaded_have=1, received_bytes=8. read_chunk(0)는 같은 8 B, idx1은 NoChunkError임 |
+| 예약·정확한 마지막 청크 | idx0 이중 reserve의 두 번째는 None. idx1의 `b"ijk"` 3 B commit → bitmap="11"·SEED·downloaded_have=2·received_bytes=11, complete_now는 한 번. read_chunk(1)는 정확히 3 B임 |
+| 반복·기동/종료 | initialize·prepare 재호출이 기존 내용을 지우지 않음. release 두 번·close/stop 두 번이 안전함. finalize 뒤 bitmap 파일은 11이며 LF 없음, lost 없음. 같은 마지막 StoreSnapshot 재조회 가능함 |
+| 세대·가상 오프라인 | 첫 청크 보유 후 남은 청크 예약 → pause → 이전 토큰 commit은 STALE·RECV 없음·bitmap 불변. 반복 pause는 세대 유지, read는 OfflineError. resume 뒤 새 토큰으로 이어받음 |
+| 해시 재시도·예외 | 크기는 같고 해시가 다른 11 B를 한 번 받으면 HASH false·CORRUPT redownload·bitmap 초기화, 두 번째 연속 실패는 FAILED·.corrupt임. 잘못된 idx는 InvalidChunkError, 알 수 없는 파일은 NoFileError임 |
+| 업로드·프로토콜 | 실제 UploadServer를 ephemeral 시험 포트와 공통 Conn으로 연결하여 BITMAP/GET·NOFILE/NOCHUNK/BADCMD·3 B DATA를 확인함. 누적 sent/distinct는 전체 송신 성공 뒤만 증가하고 SEND 로그는 없음. offline 중 응답 없음·online 재접속 가능함 |
+| 저장소·화면·종료 경계 | finalize 전에 읽기/쓰기 사용자가 모두 종료됨. snapshot만 받는 StatusScreen이 VERIFYING을 DOWN으로 표시함. 파일 미보유 영역·lost 범위·예외 전달·EXIT 마지막 줄과 종료 후 남은 스레드 0을 확인함 |
+
+위 11 B 입력은 대역/계약 검사 전용 임시 env임. 공개 env를 수정하지 않음. 실제 DEV·원격 7회 결과를 대신하지 않음. 서로 다른 패키지의 타입 변환용 임시 어댑터를 통합자가 추가하는 대신, 계약을 어긴 제공자 구현을 해당 담당 경로에서 수정해 재검사함.
 
 ### 실행 방법 — 구현 후 적용할 계약
 
@@ -411,4 +548,4 @@ Readme.txt는 조원 이름·학번·역할, 실제 언어·설치·실행, VM �
 | 40칸 막대·상태·터미널 출력 | 과제명세 §5⑦, 구현명세 §11 | 주기 제어와 화면, 황왕석 |
 | 제출 7회·bitmap/lost·검사·분석·시연 | 과제명세 §8·§9-2·§9-4–6, 구현명세 §13, PPT p.234–235 | 독립/통합 순서·분석과 최종 제출, 세 담당 |
 
-대조한 원문 범위에서 추가 미반영 필수 항목은 발견하지 못함. 공통 Conn·공유 입력·Tracker·Peer·검사 코드는 아직 구현 전이며, 구현 후 담당별 실제 검사와 VM Tracker 7회 검증이 남아 있음.
+대조한 원문 범위에서 추가 미반영 필수 항목은 발견하지 못함. 공유 자료형·예외·Protocol 파일은 제공됨. 공통 Conn·공유 검사 입력·Tracker·Peer·저장소·업로드·검사 코드는 아직 구현 전이며, 구현 후 담당별 실제 검사와 VM Tracker 7회 검증이 남아 있음.
