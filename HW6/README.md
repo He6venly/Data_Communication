@@ -1,6 +1,6 @@
 # HW6 Mini-Torrent
 
-데이터통신 2조 개발 기준임. **안선효 40% · 황대겸 30% · 황왕석 30%**의 분업을 기준으로 패키지·인터페이스·독립 검증 범위를 정함. 공통 통신과 Tracker 상태·장애·관찰·report는 구현·대역 검사됨. Tracker TCP 서버·Peer 및 나머지 구성은 아래 구현 계약을 따름. 실제 통합·원격 실행 결과와 성능 수치는 아직 없음.
+데이터통신 2조 개발 기준임. **안선효 40% · 황대겸 30% · 황왕석 30%**의 분업을 기준으로 패키지·인터페이스·독립 검증 범위를 정함. 공통 통신과 Tracker 전체는 구현되었으며 독립 Tracker 프로세스·TCP 대역 피어로 검사됨. Peer 및 나머지 구성은 아래 구현 계약을 따름. 실제 Peer 통합·원격 실행 결과와 성능 수치는 아직 없음.
 
 공식 기준은 `HW6description.pdf`와 `HW6studentSpec.pdf`임. `HW6explanation.pdf`·`HW6QnA.pdf`는 세부 해설, `hw6_student_kit/Python/`은 원본 env·검증 도구·허용 lib의 기준으로 사용함. 위치 지정 파일 I/O는 `pwriteExplanation/`의 가이드와 예제를 참고함. 배포 원본은 로컬에 보존함.
 
@@ -14,7 +14,7 @@
 | 황대겸 30% | `src/peer/`, `tests/peer/` | `hw6/peer` | Peer 진입점·Tracker 연결·control, worker pool·청크/소스 선택·제한·재시도, crash/rejoin·STALLED·DONE·종료 조율 |
 | 황왕석 30% | `src/storage/`, `src/upload/`, `tools/`, `tests/storage/`, `tests/upload/`, `tests/tools/` | `hw6/storage-upload` | 파일·bitmap·해시·결과 저장, 업로드 서버·공유 UP 제한기, 화면, 실행·결과 보관·추가 검사 도구·시연 자료 |
 
-소유 경로는 저장소 `HW6/` 기준임. 안선효의 1단위는 `hw6/tracker`에서 main에 합쳐졌고 2단위는 `hw6/tracker-unit2`에서 관리함. 표의 다른 브랜치 이름은 각 담당의 작업 기준임. 기존 체크아웃과 사용자 변경을 보존하며 새 워크트리를 만들지 않음. 상대 담당의 내부 파일을 직접 수정하지 않고 아래 공개 인터페이스와 대역으로 독립 구현함. 각 담당이 자기 코드의 테스트와 로그 정의를 작성하고 안선효가 최종 문서·결과를 합침.
+소유 경로는 저장소 `HW6/` 기준임. 안선효의 1·2단위는 main에 합쳐졌고 3단위는 `hw6/tracker-unit3`에서 관리함. 표의 다른 브랜치 이름은 각 담당의 작업 기준임. 기존 체크아웃과 사용자 변경을 보존하며 새 워크트리를 만들지 않음. 상대 담당의 내부 파일을 직접 수정하지 않고 아래 공개 인터페이스와 대역으로 독립 구현함. 각 담당이 자기 코드의 테스트와 로그 정의를 작성하고 안선효가 최종 문서·결과를 합침.
 
 ### 안선효: Tracker·통합 40%
 
@@ -30,7 +30,9 @@
 
 1단위는 common 5개·Tracker 설정/로그 7개 테스트를 통과함. common에는 공유 수신 11사례와 실제 로컬 TCP·timeout·다른 스레드의 close가 포함됨. 설정 검사는 공개 6개 env·변형 설정·오류 입력을, 로그 검사는 동시 320개 이벤트·즉시 flush·EXIT 이후 기록 차단을 포함함.
 
-2단위는 상태·scheduler·observer·report 검사 30개를 추가하여 Tracker 검사 총 37개가 통과함. 대역 시계·Peer로 전체 명령, 동시 요청, 20초 DEAD·3초 REPORT 경계, 세 파괴 조건·replica_safe, 지시 송신 실패 재시도, FULL/PARTIAL·UNDONE, hang·deadline·15초 ABORT 유예, report 고정·UTF-8 원자 저장을 확인함. 실제 Tracker 소켓·CLI·독립 프로세스 종료는 3단위 범위이며 실제 Peer·원격 실행은 아직 미실행임.
+2단위는 상태·scheduler·observer·report 검사 30개를 추가하여 당시 Tracker 검사 총 37개가 통과함. 대역 시계·Peer로 전체 명령, 동시 요청, 20초 DEAD·3초 REPORT 경계, 세 파괴 조건·replica_safe, 지시 송신 실패 재시도, FULL/PARTIAL·UNDONE, hang·deadline·15초 ABORT 유예, report 고정·UTF-8 원자 저장을 확인함.
+
+3단위는 TCP listener·연결당 handler·주기 스레드와 CLI·시그널·종료 경로를 구현함. 실제 TCP와 독립 Tracker 프로세스 검사 15개, 강제 중단 report 검사 1개를 추가함. common 5개·Tracker 38개·integration 15개, 총 58개 검사가 통과함. 마지막 BYE의 OK 송신, 지시 송신 실패·취소 재시도, 부분 수신·idle 연결 정리, 스레드 오류 전달, FULL/PARTIAL·희생자 DEAD, 실제 15초 ABORT 유예, START 전후 SIGTERM, CLI·bind·로그/report 오류를 확인함. 실제 Peer·저장소·업로드 결합과 Linux VM·제출 7회는 아직 미실행임.
 
 검사 환경은 Windows·Python 3.12.14·표준 라이브러리임. 실제 TCP 검사는 외부 접속 없이 127.0.0.1 임시 포트만 사용함. 키트 경로가 기본 로컬 배치와 다르면 `HW6_KIT_DIR`에 `hw6_student_kit/Python` 경로를 지정함. 키트가 없으면 공개 env 검사는 실패로 처리하며 skip하지 않음.
 
@@ -39,6 +41,7 @@
 $env:HW6_KIT_DIR = (Resolve-Path '../제공 파일 및 명세 설명/hw6_student_kit/Python').Path
 python -B -m unittest discover -s tests/common -v
 python -B -m unittest discover -s tests/tracker -v
+python -B -m unittest discover -s tests/integration -v
 ```
 
 1. 공통 Conn·공유 수신 사례 → env 검증·TCP 명령 → 참가·명단·생존 → scheduler·지시 → observer·report → ALLDONE·ABORT·종료 순서로 구현함. Conn은 세 소비자가 함께 사용하고 Tracker 설정·로그는 자기 패키지에서 관리함.
@@ -114,7 +117,7 @@ Python 3.12 이상과 표준 라이브러리를 사용함. 기존 Python 과제 
 
 ### 구현할 파일 구성
 
-현재 제공된 코드는 공유 contracts·Conn, Tracker config·EventLog·TrackerState·scheduler·observer·report와 해당 검사임. Tracker CLI·TCP 서버, Peer·저장소·업로드·도구는 구현 전임. 실행 디렉터리는 `HW6/`, `src/`와 그 하위 폴더는 초기화 로직 없는 Python 네임스페이스 패키지로 구성함. 담당 내부의 파일 분리는 조정할 수 있으나 소유 경로와 공개 계약은 유지함.
+현재 제공된 코드는 공유 contracts·Conn과 Tracker 전체 및 해당 검사임. Peer·저장소·업로드·도구는 구현 전임. 실행 디렉터리는 `HW6/`, `src/`와 그 하위 폴더는 초기화 로직 없는 Python 네임스페이스 패키지로 구성함. 담당 내부의 파일 분리는 조정할 수 있으나 소유 경로와 공개 계약은 유지함.
 
 ```text
 HW6/
@@ -125,8 +128,8 @@ HW6/
 │   │   ├── contracts.py         고정 자료형·예외·Protocol (제공됨)
 │   │   └── transport.py         Conn·줄/정확한 바이트 수신 (구현·검사됨)
 │   ├── tracker/                 안선효 40%
-│   │   ├── __main__.py          CLI·기동·종료
-│   │   ├── server.py            TCP listener·handler (3단위)
+│   │   ├── __main__.py          CLI·시그널·report·최종 EXIT (구현·검사됨)
+│   │   ├── server.py            TCP listener·handler·스레드 정리 (구현·검사됨)
 │   │   ├── state.py             명령·명단·공유 상태 (구현·검사됨)
 │   │   ├── scheduler.py         생존·가상 장애·완료·ABORT (구현·검사됨)
 │   │   ├── observer.py          REPORT·복제·replica_safe (구현·검사됨)
@@ -158,14 +161,14 @@ HW6/
     ├── common/                  안선효, 공통 Conn 검사
     ├── fixtures/transport.json  안선효, 세 담당의 공유 수신 사례
     ├── tracker/                 안선효
-    ├── integration/             안선효
+    ├── integration/             안선효, Tracker 실제 TCP·독립 프로세스 검사
     ├── peer/                    황대겸
     ├── storage/                 황왕석
     ├── upload/                  황왕석
     └── tools/                   황왕석
 ```
 
-Tracker와 Peer는 `python -m src.tracker`, `python -m src.peer`로 실행함. 업로드·저장소는 Peer 프로세스 안에서 동작하며 별도 프로세스를 추가하지 않음. **Tracker·Peer·Upload 모두 `src.common.transport.Conn` 하나를 import함.** 자료형·예외·Protocol은 모두 `src.common.contracts`를 import하고 각자 다시 정의하지 않음. 공통 모듈에 env 읽기·로그·Tracker/Peer 실행 로직을 넣지 않음. 배포 lib를 활용할 때는 해당 담당 패키지 안에 필요한 파일과 출처·라이선스를 보존함. 실행에 필요한 원본 env·도구는 별도 키트 경로로 받음.
+Tracker는 `python -m src.tracker`로 실행함. Peer 진입점은 구현 후 `python -m src.peer`를 사용함. 업로드·저장소는 Peer 프로세스 안에서 동작하며 별도 프로세스를 추가하지 않음. **Tracker·Peer·Upload 모두 `src.common.transport.Conn` 하나를 import함.** 자료형·예외·Protocol은 모두 `src.common.contracts`를 import하고 각자 다시 정의하지 않음. 공통 모듈에 env 읽기·로그·Tracker/Peer 실행 로직을 넣지 않음. 배포 lib를 활용할 때는 해당 담당 패키지 안에 필요한 파일과 출처·라이선스를 보존함. 실행에 필요한 원본 env·도구는 별도 키트 경로로 받음.
 
 ### 생성자·import·의존 방향
 
@@ -284,7 +287,7 @@ FileStore는 commit의 디스크 기록·bitmap 갱신 직후 RECV를 기록하�
 
 서명은 `read_line() -> str`, `read_exact(n:int) -> bytes`, `send_line(text:str) -> None`, `send_all(data:bytes) -> None`, `close() -> None`임. Conn(sock)은 소켓당 하나의 rbuf를 소유함. read_line은 LF까지 소비하고 LF를 뺀 UTF-8 문자열, read_exact는 버퍼의 남은 바이트부터 정확히 n바이트를 반환함. send_line은 UTF-8+LF, send_all은 헤더·바이너리의 전부 송신, close는 대기 중 I/O를 깨우는 종료를 담당하며 반복 가능함. 불완전한 줄·본문의 EOF는 공통 contracts의 ConnClosed, 시간 초과는 TimeoutError로 전달하며 짧은 본문을 성공으로 돌려주지 않음. n=0은 빈 bytes임. timeout·연결 재수립·DATA idx/len·LIST/PEERS 후속 줄 수 검증은 호출자의 책임임. 중간 응답에서 timeout/EOF가 나면 그 연결을 폐기하고 새 연결에서 요청 전체를 다시 시작함.
 
-공유 JSON은 사례 id, 수신 조각의 16진수 배열, 호출 순서, 기대 반환값·예외로 구성하는 계약임. 아래 입력을 세 담당이 동일하게 사용하며, 표는 구현 전 검사 기준이고 실행 PASS가 아님.
+공유 JSON은 사례 id, 수신 조각의 16진수 배열, 호출 순서, 기대 반환값·예외로 구성함. 아래 11입력은 common 검사에서 통과함. Peer·Upload 소비자의 명령 처리까지 검증한 것은 아니므로 각 담당도 같은 입력과 자기 응답 검사를 사용함.
 
 | 공유 사례 | 입력·조건 | 확인할 결과 |
 | --- | --- | --- |
@@ -427,7 +430,7 @@ report 시각은 START 기준, JSONL `t`는 각 프로세스 시작 기준임. �
 
 report는 UTF-8 객체 하나·들여쓰기 2칸·시각 소수 둘째자리로 저장함. 발생하지 않은 시각·값은 null, 대상이 없는 목록·객체는 빈 값으로 둠. 파괴한 피어의 마지막 have도 진행률의 누적 합에 보존함. 모두 DONE인 정상 마무리를 hang으로 오판하지 않으며, START 이전에는 START 기준 장애·hang·deadline을 진행하지 않음. FILES의 nholders는 REGISTER/HAVE 보유자 수이고 PEERS는 그중 live·BYE 아님만 반환함.
 
-#### Tracker 2단위 호출과 3단위 연결
+#### Tracker 상태 호출과 TCP 연결
 
 `from src.tracker.state import TrackerState`로 상태 하나를 생성함. 생성자는 `TrackerState(*, env, emit, clock=time.monotonic)`이며 파일·소켓·스레드를 열지 않음. `emit`은 `EventLog.event`와 같은 호출 계약임. 내부 env·상태를 직접 바꾸지 않고 아래 메서드만 사용함. `clock` 주입은 대역 검사 용도임.
 
@@ -437,15 +440,22 @@ report는 UTF-8 객체 하나·들여쓰기 2칸·시각 소수 둘째자리로 
 | `delivery_valid(token) -> bool` | 지시 송신 직전 확인함. 종료가 먼저 확정되면 false이며 송신하지 않고 `delivery_failed`로 정리함 |
 | `delivery_succeeded(token) -> bool` | CMD 줄 송신이 성공한 뒤 호출함. 한 번만 전달을 확정하고 DISCONNECT의 실제 송신 시각을 `crashes_sent`에 기록함 |
 | `delivery_failed(token) -> None` | CMD 송신 실패·취소 시 반드시 호출함. 아직 실행 중이면 다음 HEARTBEAT에서 재시도하고 종료 후면 버림 |
-| `tick()`, `observe()` | 3단위에서 scheduler 0.5초·observer 1초 주기로 호출함. 이 메서드 자체는 스레드를 만들거나 sleep하지 않음 |
+| `tick()`, `observe()` | server에서 scheduler 0.5초·observer 1초 주기로 호출함. 이 메서드 자체는 스레드를 만들거나 sleep하지 않음 |
 | `snapshot() -> dict` | 상태 표시·검사용 복사본임. 반환값 수정은 내부 상태에 영향을 주지 않음 |
 | `exit_code() -> int \| None` | 정상 종료 준비면 0, ABORT 종료 준비면 2, 대기 중이면 None임. 시간 경과만으로 DEAD 로그를 생략하지 않도록 scheduler 판정을 먼저 수행함 |
-| `prepare_report() -> dict` | 종료 조건 충족 및 송신 중 지시 0개일 때 최종 복사본을 고정함. 준비 전 호출은 공통 `LifecycleError`임. 고정 후 `handle`은 같은 예외이며 `tick/observe`는 상태를 바꾸지 않음 |
+| `abort(reason) -> None` | 시그널·실행 오류의 첫 중단 사유를 기록함. 상태 Lock 밖에서 이벤트를 출력하며 이미 확정한 ALLDONE·ABORT를 되돌리지 않음 |
+| `prepare_report(*, force=False) -> dict` | 종료 조건 충족 및 송신 중 지시 0개일 때 최종 복사본을 고정함. 준비 전 호출은 공통 `LifecycleError`임. 시그널·실행 오류에서는 중단을 먼저 확정하고 모든 스레드를 정리한 뒤 force=True로 호출함. 고정 후 `handle`은 같은 예외이며 `tick/observe`는 상태를 바꾸지 않음 |
 | `write_report(path, report)` | `src.tracker.report` 함수임. Lock 밖에서 UTF-8·LF·들여쓰기 2칸으로 임시 파일에 기록하고 원자 교체함. 실패는 호출부에 전파하며 기존 결과 파일을 보존함 |
 
-상태 Lock에서는 판정·응답 복사·이벤트 적재만 수행하고 송신·로그·report 파일 I/O는 밖에서 수행함. 이벤트 출력은 별도 Lock으로 생성 순서를 유지하며 로그 I/O 오류를 숨기지 않음. 3단위 handler는 모든 지시의 성공·실패 콜백을 `try/finally` 경로에서 빠짐없이 확정해야 함. `delivery_valid` 확인과 실제 송신 사이에 종료가 겹치면 완료된 송신은 성공 콜백으로 실제 기록을 남기며, 종료 정리에서 해당 handler가 끝나기 전에 report를 고정하지 않음.
+상태 Lock에서는 판정·응답 복사·이벤트 적재만 수행하고 송신·로그·report 파일 I/O는 밖에서 수행함. 이벤트 출력은 별도 Lock으로 생성 순서를 유지하며 로그 I/O 오류를 숨기지 않음. handler는 모든 지시의 성공·실패 콜백을 `try/finally` 경로에서 확정함. `delivery_valid` 확인과 실제 송신 사이에 종료가 겹치면 완료된 송신은 성공 콜백으로 실제 기록을 남기며, 종료 정리에서 해당 handler가 끝나기 전에 report를 고정하지 않음.
 
-같은 피어의 crash는 도래 순서로 큐에 보관하며 파괴 지시가 우선함. 파괴 송신 성공 뒤 그 피어의 남은 crash를 버림. ALLDONE·ABORT는 최초 판정을 고정하고 이후 DONE/UNDONE은 확인 응답만 하며 완료 판정을 되돌리지 않음. 이 순서·멱등성·송신 확인은 지시 누락과 종료 경쟁을 줄이기 위한 팀 설계임. 최종 `START_PROGRAM`·listener/handler 시작·중단, `write_report`, 마지막 `EXIT`·로그 close는 3단위 main이 담당함.
+같은 피어의 crash는 도래 순서로 큐에 보관하며 파괴 지시가 우선함. 파괴 송신 성공 뒤 그 피어의 남은 crash를 버림. ALLDONE·ABORT는 최초 판정을 고정하고 이후 DONE/UNDONE은 확인 응답만 하며 완료 판정을 되돌리지 않음. 이 순서·멱등성·송신 확인은 지시 누락과 종료 경쟁을 줄이기 위한 팀 설계임.
+
+`TrackerServer(*, env, emit, port=None, host="0.0.0.0")`는 생성 시 I/O를 하지 않음. `start()`가 bind/listen과 접수·scheduler·observer 스레드를 시작하고 `wait()`가 정상·ABORT·중단 종료 코드를 반환함. `request_stop()`은 시그널용 Event 설정만 수행함. `close()`는 멱등이며 재시작은 허용하지 않음. port=0은 직접 서버를 사용하는 테스트 전용이며 CLI에서는 1~65535만 받음. 접수 timeout은 0.25초, 연결 송수신 timeout은 5초임.
+
+main은 `START_PROGRAM` → listen → 요청 처리 → 접수 중단 → 진행 중 응답 최대 1초 대기 → 연결 shutdown·모든 handler/보조 스레드 join(정리 전체 최대 5초) → report → 마지막 `EXIT` → 로그 close 순서로 동작함. 마지막 BYE는 상태 반영과 OK 송신이 끝난 뒤 연결을 닫음. 스레드가 제한 시간 안에 끝나지 않으면 정리 실패로 알리고 report·정상 EXIT를 기록하지 않음. accept·handler·scheduler·observer의 예상하지 못한 오류는 main으로 전달해 exit 2로 처리함. 개별 연결 단절·송수신 timeout은 해당 연결에서 처리함.
+
+Ctrl+C·SIGTERM(Windows SIGBREAK 포함)은 `interrupted` 사유로 즉시 정리하고 exit 2로 끝내는 팀 설계임. START 전에 중단하면 기준 시각이 없으므로 report의 T_exit는 null임. CLI·env·bind 등 시작 오류는 exit 1이며 로거가 열린 뒤에는 ERROR와 마지막 EXIT를 남김. report 저장 실패도 exit 2·ERROR로 알리고 기존 report는 보존함. 로그를 쓸 수 없거나 정리 자체가 실패한 경우에는 stderr로 실패를 알리며 EXIT 기록 성공을 보장하지 않음.
 
 ## 독립 개발과 통합 순서
 
@@ -455,11 +465,11 @@ report는 UTF-8 객체 하나·들여쓰기 2칸·시각 소수 둘째자리로 
 
 중요한 함수·메서드·자료형에는 실제 기능을 설명하는 한 줄 한글 docstring을 작성함. 문체는 “~함”, “~음”, “~임”으로 맞추고 기능·의도·순서 제약을 간결하게 적음. 예: `줄바꿈까지 읽고 남은 데이터는 버퍼에 보존함.` 이후 구현에도 같은 기준을 적용함.
 
-각 담당의 첫 검사는 다음과 같음. 아래 명령은 해당 테스트를 구현한 뒤 실행하며 현재 테스트가 존재한다는 뜻은 아님. 대역 테스트는 실제 클래스를 같은 API로 교체할 수 있도록 구성함.
+각 담당의 첫 검사는 다음과 같음. common·Tracker와 Tracker TCP 통합 검사는 제공됨. 나머지 담당의 명령은 해당 테스트 구현 후 사용함. 대역 테스트는 실제 클래스를 같은 API로 교체할 수 있도록 구성함.
 
 | 담당 | 첫 구현·검사 | 독립 검사 명령 |
 | --- | --- | --- |
-| 안선효 | common Conn·공유 입력 → Tracker, contracts와 서명 일치 | `python -m unittest discover -s tests/common -v`, `python -m unittest discover -s tests/tracker -v` |
+| 안선효 | common Conn·공유 입력 → Tracker 상태 → 실제 TCP·종료 | `python -m unittest discover -s tests/common -v`, `python -m unittest discover -s tests/tracker -v`, `python -m unittest discover -s tests/integration -v` |
 | 황대겸 | EventLog·CLI → 대역 StorePort/UploadPort → control·worker | `python -m unittest discover -s tests/peer -v` |
 | 황왕석 | FileStore와 공개 반환형 → UploadServer → StatusScreen·도구 | `python -m unittest discover -s tests/storage -v`, `python -m unittest discover -s tests/upload -v`, `python -m unittest discover -s tests/tools -v` |
 
@@ -488,7 +498,7 @@ control이나 handler가 자신을 join하거나 finalize를 직접 호출하지
 
 ### 통합 인수 검사
 
-안선효가 `tests/integration/test_interfaces.py`에 아래 실제 클래스 검사를 구현하고 `python -m unittest discover -s tests/integration -v`로 실행함. 생성자/메서드 서명 검사에서 그치지 않고 반환 객체·로그·파일·상태 전이를 함께 확인함. 개인 구현의 내부 fd/Lock/자료구조에 의존하지 않음.
+안선효가 `tests/integration/test_interfaces.py`에 아래 실제 클래스 검사를 구현하고 `python -m unittest discover -s tests/integration -v`로 실행함. 현재 integration의 15검사는 Tracker의 실제 TCP·프로세스 검사이며 아래 Store/Upload/Peer 계약 검사는 아직 포함하지 않음. 생성자/메서드 서명 검사에서 그치지 않고 반환 객체·로그·파일·상태 전이를 함께 확인함. 개인 구현의 내부 fd/Lock/자료구조에 의존하지 않음.
 
 | 검사 | 공통 입력·기대 결과 |
 | --- | --- |
@@ -503,9 +513,9 @@ control이나 handler가 자신을 join하거나 finalize를 직접 호출하지
 
 위 11 B 입력은 대역/계약 검사 전용 임시 env임. 공개 env를 수정하지 않음. 실제 DEV·원격 7회 결과를 대신하지 않음. 서로 다른 패키지의 타입 변환용 임시 어댑터를 통합자가 추가하는 대신, 계약을 어긴 제공자 구현을 해당 담당 경로에서 수정해 재검사함.
 
-### 실행 방법 — 구현 후 적용할 계약
+### 실행 방법
 
-아래는 **예정 명령**이며 현재 구현이 없어 실행할 수 없음. `HW6/`에서 실행하며 `KIT`는 각 실행 환경의 `hw6_student_kit/Python` 실제 경로, `TRACKER_IP`는 실제 주소로 바꿈. 양쪽은 같은 원본 env를 사용함. Windows는 `python`, Linux·WSL은 `python3`를 사용함.
+Tracker 명령은 실행 가능함. 아래 Peer 명령은 조원 구현을 합친 뒤 적용할 계약임. `HW6/`에서 실행하며 `KIT`는 각 실행 환경의 `hw6_student_kit/Python` 실제 경로, `TRACKER_IP`는 실제 주소로 바꿈. 양쪽은 같은 원본 env를 사용함. Windows는 `python`, Linux·WSL은 `python3`를 사용함. Tracker는 현재 작업 폴더의 `logs/tracker.jsonl`과 `report.json`을 생성하며 START 전에는 피어 네 명의 HELLO를 기다림.
 
 ```text
 python "KIT/lib/env_example.py" --env "KIT/envs/B.json" --id P3
@@ -538,8 +548,8 @@ Peer는 기본 포트여도 IP·PORT를 모두 받음. Tracker를 6100으로 띄
 - `reset_dirs.py`는 현재 작업 폴더 기준 p1–p4·logs·report를 삭제함. 이전 결과를 `runs/<Run>/`에 보관한 뒤 실행함. 제출 기록만 보관한 폴더에서는 큰 데이터가 없어 공식 verify를 다시 돌릴 수 없음. verify는 원래 데이터가 남은 실행 폴더에서 먼저 수행함.
 - 초기화 도구는 data의 파일 크기가 같으면 원본을 재생성하지 않음. 잘못된 동일 크기 데이터는 Peer 시작 시 env 해시 검사로 거부해야 함.
 - 배포 `run_dev.sh`는 루트 tracker.py·peer.py를 가정하는 로컬 DEV 예시이며 6000번 포트를 사용함. 팀 패키지 진입점과 다르고 정책 인자도 전달하지 않으므로 그대로 사용하지 않음. 실행 도구는 `python -m src.peer`를 사용함.
-- `argparse` 기본 사용법 오류는 exit 2이지만 과제의 인자 오류는 exit 1임. 진입점에서 맞춰야 함.
-- 키트 로거는 append 방식이므로 실행 전 초기화가 필요함. 경과 시간·timeout·속도 예약은 단조 시계를 사용하는 안이며, 사용한 로거의 시계 기준도 실제 코드·로그 사전에 맞춤.
+- `argparse` 기본 사용법 오류는 exit 2이지만 과제의 인자 오류는 exit 1임. Tracker 진입점은 exit 1로 처리하며 Peer도 동일하게 구현함.
+- 팀 EventLog와 키트 로거는 append 방식이므로 실행 전 기록 보관·초기화가 필요함. Tracker의 경과 시간·timeout은 단조 시계를 사용함. Peer 속도 예약도 단조 시계를 사용하고 로그 사전에 실제 시계 기준을 맞춤.
 - 공식 verify는 종료 코드·데이터·수렴·손실·JSON 파싱을 검사함. 속도·화면·report 스키마·희생자의 모든 bitmap·lost 범위·마지막 줄 EXIT·C3 정책 일치까지 PASS로 보장하지 않으므로 별도 대조함.
 
 ## 분석과 최종 제출
@@ -594,4 +604,4 @@ Readme.txt는 조원 이름·학번·역할, 실제 언어·설치·실행, VM �
 | 40칸 막대·상태·터미널 출력 | 과제명세 §5⑦, 구현명세 §11 | 주기 제어와 화면, 황왕석 |
 | 제출 7회·bitmap/lost·검사·분석·시연 | 과제명세 §8·§9-2·§9-4–6, 구현명세 §13, PPT p.234–235 | 독립/통합 순서·분석과 최종 제출, 세 담당 |
 
-대조한 원문 범위에서 추가 미반영 필수 항목은 발견하지 못함. 공유 자료형·예외·Protocol과 Conn·공유 수신 입력·Tracker 설정/로그·상태·scheduler·observer·report 및 해당 검사는 제공됨. Tracker TCP 서버·CLI·독립 프로세스 종료, Peer·저장소·업로드·통합 검사와 VM Tracker 7회 검증이 남아 있음.
+대조한 원문 범위에서 추가 미반영 필수 항목은 발견하지 못함. 공유 자료형·예외·Protocol과 Conn·공유 수신 입력·Tracker 전체 및 대역·실제 TCP·독립 프로세스 검사는 제공됨. 실제 Peer·저장소·업로드 결합 검사와 Linux VM Tracker 7회 검증이 남아 있음.

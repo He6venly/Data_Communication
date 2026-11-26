@@ -26,6 +26,19 @@ class ReportTests(StateCase):
         self.assertEqual(self.state.exit_code(), 0)
         return self.state.prepare_report()
 
+    def test_forced_report_requires_terminal_and_preserves_prestart_null(self):
+        """강제 저장도 중단 확정을 요구하고 START 없는 종료 시각은 null로 남김."""
+        with self.assertRaises(LifecycleError):
+            self.state.prepare_report(force=True)
+        self.state.abort("interrupted")
+        with self.assertRaises(LifecycleError):
+            self.state.prepare_report()
+        report = self.state.prepare_report(force=True)
+        self.assertEqual(report["abort"], "interrupted")
+        self.assertIsNone(report["T_exit"])
+        self.state.abort("server_error")
+        self.assertEqual(self.state.prepare_report()["abort"], "interrupted")
+
     def test_exact_schema_nulls_and_frozen_snapshot(self):
         """정식 키 순서·null·START 기준 시각과 반환값 격리를 확인함."""
         self.join_all()
