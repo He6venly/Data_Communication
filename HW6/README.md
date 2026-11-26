@@ -14,9 +14,30 @@
 | 황대겸 30% | `src/peer/`, `tests/peer/` | `hw6/peer` | Peer 진입점·Tracker 연결·control, worker pool·청크/소스 선택·제한·재시도, crash/rejoin·STALLED·DONE·종료 조율 |
 | 황왕석 30% | `src/storage/`, `src/upload/`, `tools/`, `tests/storage/`, `tests/upload/`, `tests/tools/` | `hw6/storage-upload` | 파일·bitmap·해시·결과 저장, 업로드 서버·공유 UP 제한기, 화면, 실행·결과 보관·추가 검사 도구·시연 자료 |
 
-소유 경로는 저장소 `HW6/` 기준임. 브랜치 이름은 작업 기준이며 현재 브랜치를 만들었다는 뜻은 아님. 기존 체크아웃과 사용자 변경을 보존하며 새 워크트리를 만들지 않음. 상대 담당의 내부 파일을 직접 수정하지 않고 아래 공개 인터페이스와 대역으로 독립 구현함. 각 담당이 자기 코드의 테스트와 로그 정의를 작성하고 안선효가 최종 문서·결과를 합침.
+소유 경로는 저장소 `HW6/` 기준임. 안선효의 1단위 구현은 `hw6/tracker` 브랜치에서 관리함. 표의 다른 브랜치 이름은 각 담당의 작업 기준임. 기존 체크아웃과 사용자 변경을 보존하며 새 워크트리를 만들지 않음. 상대 담당의 내부 파일을 직접 수정하지 않고 아래 공개 인터페이스와 대역으로 독립 구현함. 각 담당이 자기 코드의 테스트와 로그 정의를 작성하고 안선효가 최종 문서·결과를 합침.
 
 ### 안선효: Tracker·통합 40%
+
+#### 안선효 작업 3단위
+
+| 단위 | 구현 범위 | 다음 단위로 넘어가는 기준 |
+| --- | --- | --- |
+| 1. 공통 통신·입력·기록 기반 | 공통 Conn·공유 수신 사례, Tracker env/CLI 검증, EventLog | 분할/붙은 수신·바이너리·EOF/timeout/close, 공개 env·변형 env·설정 오류, 동시 로그·EXIT 마지막 줄 검사 통과 |
+| 2. Tracker 상태·장애·관찰 | 전체 명령, 참가·생존·pending·세 파괴 조건, fresh REPORT·복제 지표·ALLDONE·ABORT·report | 대역 시계·Peer로 경계 시각·재참가·정합성·오류 입력을 검사하고 상태 Lock 밖 I/O 확인 |
+| 3. 실제 TCP·종료·인계 | CLI·독립 프로세스 Tracker, 대역 Peer 4개 실제 TCP, 신호·연결 정리, 사용자 파트 인계 | 정상/희생/ABORT 종료·실제 로그/report·잔여 스레드/프로세스 검사 통과. 실제 Peer·VM 7회는 조원 구현 통합 뒤 별도 검증 |
+
+각 단위의 실제 검사 결과를 확인한 뒤 다음 단위로 진행함. 대역 결과와 실제 Peer·원격 실행을 구분하며 날짜별 일정표는 두지 않음.
+
+1단위는 common 5개·Tracker 설정/로그 7개 테스트를 통과함. common에는 공유 수신 11사례와 실제 로컬 TCP·timeout·다른 스레드의 close가 포함됨. 설정 검사는 공개 6개 env·변형 설정·오류 입력을, 로그 검사는 동시 320개 이벤트·즉시 flush·EXIT 이후 기록 차단을 포함함. 2·3단위와 실제 Peer·원격 실행은 아직 미실행임.
+
+검사 환경은 Windows·Python 3.12.14·표준 라이브러리임. 실제 TCP 검사는 외부 접속 없이 127.0.0.1 임시 포트만 사용함. 키트 경로가 기본 로컬 배치와 다르면 `HW6_KIT_DIR`에 `hw6_student_kit/Python` 경로를 지정함. 키트가 없으면 공개 env 검사는 실패로 처리하며 skip하지 않음.
+
+```powershell
+# HW6/에서, 실제 배포 키트 경로로 변경함.
+$env:HW6_KIT_DIR = (Resolve-Path '../제공 파일 및 명세 설명/hw6_student_kit/Python').Path
+python -B -m unittest discover -s tests/common -v
+python -B -m unittest discover -s tests/tracker -v
+```
 
 1. 공통 Conn·공유 수신 사례 → env 검증·TCP 명령 → 참가·명단·생존 → scheduler·지시 → observer·report → ALLDONE·ABORT·종료 순서로 구현함. Conn은 세 소비자가 함께 사용하고 Tracker 설정·로그는 자기 패키지에서 관리함.
 2. 대역 Peer 4개로 REGISTER/HAVE·LIST/PEERS·heartbeat·재참가·DONE/UNDONE·BYE를 확인함. 분할/합친 수신, 낡은 REPORT, 세 파괴 조건, replica_safe, DEAD·hang·deadline도 검사함.
@@ -91,7 +112,7 @@ Python 3.12 이상과 표준 라이브러리를 사용함. 기존 Python 과제 
 
 ### 구현할 파일 구성
 
-현재 제공된 코드는 `src/common/contracts.py`의 자료형·예외·Protocol뿐임. 아래 Conn·Tracker·Peer·저장소·업로드·도구는 구현 전임. 실행 디렉터리는 `HW6/`, `src/`와 그 하위 폴더는 초기화 로직 없는 Python 네임스페이스 패키지로 구성함. 담당 내부의 파일 분리는 조정할 수 있으나 소유 경로와 공개 계약은 유지함.
+현재 제공된 코드는 공유 contracts·Conn과 Tracker config·EventLog이며 각 검사도 포함함. Tracker 명령·상태·CLI 서버, Peer·저장소·업로드·도구는 구현 전임. 실행 디렉터리는 `HW6/`, `src/`와 그 하위 폴더는 초기화 로직 없는 Python 네임스페이스 패키지로 구성함. 담당 내부의 파일 분리는 조정할 수 있으나 소유 경로와 공개 계약은 유지함.
 
 ```text
 HW6/
@@ -100,7 +121,7 @@ HW6/
 ├── src/
 │   ├── common/                  안선효 40%, 세 소비자가 공유
 │   │   ├── contracts.py         고정 자료형·예외·Protocol (제공됨)
-│   │   └── transport.py         Conn·줄/정확한 바이트 수신 (구현 대상)
+│   │   └── transport.py         Conn·줄/정확한 바이트 수신 (구현·검사됨)
 │   ├── tracker/                 안선효 40%
 │   │   ├── __main__.py          CLI·기동·종료
 │   │   ├── server.py            요청 처리·명단·공유 상태
@@ -548,4 +569,4 @@ Readme.txt는 조원 이름·학번·역할, 실제 언어·설치·실행, VM �
 | 40칸 막대·상태·터미널 출력 | 과제명세 §5⑦, 구현명세 §11 | 주기 제어와 화면, 황왕석 |
 | 제출 7회·bitmap/lost·검사·분석·시연 | 과제명세 §8·§9-2·§9-4–6, 구현명세 §13, PPT p.234–235 | 독립/통합 순서·분석과 최종 제출, 세 담당 |
 
-대조한 원문 범위에서 추가 미반영 필수 항목은 발견하지 못함. 공유 자료형·예외·Protocol 파일은 제공됨. 공통 Conn·공유 검사 입력·Tracker·Peer·저장소·업로드·검사 코드는 아직 구현 전이며, 구현 후 담당별 실제 검사와 VM Tracker 7회 검증이 남아 있음.
+대조한 원문 범위에서 추가 미반영 필수 항목은 발견하지 못함. 공유 자료형·예외·Protocol과 Conn·공유 수신 입력·Tracker 설정/로그 및 해당 검사는 제공됨. Tracker 상태/서버·Peer·저장소·업로드·통합 검사는 구현 전이며, 담당별 실제 검사와 VM Tracker 7회 검증이 남아 있음.
