@@ -1,0 +1,27 @@
+# Python 생성 파일
+__pycache__/
+*.py[cod]
+.venv/
+
+# 실행 데이터·결과는 로컬에서 보관 후 제출 사본으로 취합
+/data/
+/logs/
+/p[1-4]/
+/runs/
+/report.json
+/verify.txt
+*.part
+*.incomplete
+*.corrupt
+
+# 교수자 배포 원본·영상·임시 자료
+/hw6_student_kit/
+*.pdf
+*.mp4
+/tmp/
+
+# 접속 키·로컬 비밀 설정
+*.pem
+*.key
+.env
+.env.*

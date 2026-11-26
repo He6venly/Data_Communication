@@ -10,9 +10,13 @@
 | [HW3](HW3/Readme.txt) | Fault-Tolerant 협업 Worker Ring | Python | 완료 |
 | [HW4](HW4/README.md) | ASCII Evolution - N-Worker 협업 진화 | Python | 완료 |
 | [HW5](HW5/README.md) | Card Duel League - 10-Player 동시 대전 리그 | Python | 담당·설계 확정, 구현 전 |
+| [HW6](HW6/README.md) | Mini-Torrent - 4-Peer 하이브리드 P2P 파일 공유 | Python | 4:3:3 분업·패키지 설계, 구현 전 |
 
 각 과제의 설명과 실행 방법은 해당 과제 README를 참고하세요.
 
 HW4 개발은 [HW4 README](HW4/README.md)를 최종 기준으로 사용합니다. 담당 작업·공통 규약·검증·제출 조건을 해당 문서에 통합했습니다.
 
 HW5의 확정 담당·공통 명세·검증·제출 기준은 아래 문서를 따름. [HW5 README](HW5/README.md)
+
+HW6의 4:3:3 분업·패키지·공통 인터페이스·독립 검증·통합·제출 기준은 [HW6 README](HW6/README.md)를 따름. 안선효는 Tracker·통합 40%, 황대겸은 Peer 제어·다운로드 30%, 황왕석은 저장소·업로드·도구 30%를 담당함.
+
