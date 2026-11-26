@@ -21,22 +21,26 @@ TIMING_KEYS = (
 
 
 def _bad(message: str) -> None:
+    """설정 오류를 공통 예외로 전달함."""
     raise ConfigurationError(message, operation="config")
 
 
 def _object(value: Any, name: str) -> dict:
+    """설정 항목이 JSON 객체인지 확인함."""
     if not isinstance(value, dict):
         _bad(f"{name}: object required")
     return value
 
 
 def _text(value: Any, name: str) -> str:
+    """설정 문자열이 비어 있지 않은지 확인함."""
     if not isinstance(value, str) or not value:
         _bad(f"{name}: nonempty string required")
     return value
 
 
 def _integer(value: Any, name: str, minimum: int | None = 1) -> int:
+    """불리언을 제외한 정수 타입과 최솟값을 확인함."""
     if type(value) is not int or (minimum is not None and value < minimum):
         bound = "" if minimum is None else f" >= {minimum}"
         _bad(f"{name}: integer{bound} required")
@@ -44,6 +48,7 @@ def _integer(value: Any, name: str, minimum: int | None = 1) -> int:
 
 
 def _number(value: Any, name: str, minimum: float = 0, *, positive=False) -> float:
+    """NaN·무한대·불리언을 제외하고 수치 범위를 확인함."""
     if type(value) not in (int, float) or not math.isfinite(value):
         _bad(f"{name}: finite number required")
     if value < minimum or (positive and value <= 0):
@@ -52,6 +57,7 @@ def _number(value: Any, name: str, minimum: float = 0, *, positive=False) -> flo
 
 
 def port_number(text: str) -> int:
+    """실행 인자의 포트를 정수로 바꾸고 유효 범위를 확인함."""
     try:
         port = int(text)
     except (ValueError, TypeError) as exc:
@@ -62,6 +68,7 @@ def port_number(text: str) -> int:
 
 
 def _validate_env(env: Any) -> dict:
+    """env 항목의 타입·범위·참조 관계를 변경 없이 대조함."""
     e = _object(env, "env")
     if type(e.get("version")) is not int or e["version"] != 1:
         _bad("unsupported env version")
@@ -154,6 +161,7 @@ def _validate_env(env: Any) -> dict:
 
 
 def validate_env(env: Any) -> dict:
+    """잘못된 설정 구조도 ConfigurationError로 묶어 전달함."""
     try:
         return _validate_env(env)
     except (TypeError, KeyError, OverflowError) as exc:
@@ -161,6 +169,7 @@ def validate_env(env: Any) -> dict:
 
 
 def load_env(path: str | Path) -> dict:
+    """UTF-8 JSON 설정을 읽고 형식과 실행 조건을 검증함."""
     try:
         with open(path, encoding="utf-8") as stream:
             env = json.load(stream)
@@ -170,11 +179,15 @@ def load_env(path: str | Path) -> dict:
 
 
 class _Parser(argparse.ArgumentParser):
+    """사용법 오류를 과제의 설정 오류로 처리함."""
+
     def error(self, message: str) -> None:
+        """인자 해석 실패를 main이 처리할 공통 예외로 전달함."""
         raise ConfigurationError(message, operation="cli")
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """필수 env 경로와 선택 Tracker 포트 인자를 읽음."""
     parser = _Parser(description="HW6 Tracker")
     parser.add_argument("--env", required=True, type=Path)
     parser.add_argument("port", nargs="?", type=port_number)

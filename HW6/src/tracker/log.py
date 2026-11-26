@@ -13,7 +13,10 @@ from src.common.contracts import JSONValue, LifecycleError
 
 
 class EventLog:
+    """여러 스레드의 이벤트를 JSONL 파일 하나에 기록함."""
+
     def __init__(self, *, peer_id: str, root: Path, started_at: float) -> None:
+        """로그 파일과 동시 기록용 Lock을 준비함."""
         if not isinstance(peer_id, str) or not peer_id or "/" in peer_id or "\\" in peer_id:
             raise ValueError("invalid log id")
         if not math.isfinite(started_at):
@@ -29,6 +32,7 @@ class EventLog:
         self._stream = (directory / f"{peer_id}.jsonl").open("a", encoding="utf-8", newline="\n")
 
     def event(self, ev: str, **fields: JSONValue) -> None:
+        """이벤트를 한 줄로 기록하고 EXIT 뒤 추가 기록을 차단함."""
         if not isinstance(ev, str) or not ev:
             raise ValueError("event name is required")
         if {"t", "peer", "ev"}.intersection(fields):
@@ -49,6 +53,7 @@ class EventLog:
                 self._sealed = True
 
     def recent(self, n: int = 5) -> tuple[str, ...]:
+        """화면용 최근 이벤트를 시간순 복사본으로 반환함."""
         if type(n) is not int:
             raise TypeError("n must be int")
         if n < 0:
@@ -57,6 +62,7 @@ class EventLog:
             return tuple(self._recent)[-n:] if n else ()
 
     def close(self) -> None:
+        """로그 파일을 한 번만 닫고 중복 종료를 허용함."""
         with self._lock:
             if not self._closed:
                 self._stream.close()
