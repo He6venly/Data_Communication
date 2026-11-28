@@ -6,6 +6,7 @@ from time import monotonic
 from src.common.contracts import ConfigurationError, PeerView, ShutdownError, StoreIOError
 from src.common.transport import Conn
 from .control import Control
+from .deadline import DeadlineSocket
 from .download import DownloadPool
 from .selection import Selection
 from .tracker_link import ProtocolError, TrackerLink
@@ -14,8 +15,10 @@ from .tracker_link import ProtocolError, TrackerLink
 def read_bitmap(address, name, count, timeout):
     """상대 bitmap의 청크 수와 각 비트를 확인해서 돌려줌."""
     conn = None
+    deadline = monotonic()+timeout
     try:
-        conn = Conn(socket.create_connection(address, timeout=timeout))
+        conn = Conn(DeadlineSocket(socket.create_connection(address, timeout=timeout)))
+        conn.sock.deadline = deadline
         conn.send_line(f"BITMAP {name}")
         head = conn.read_line().split()
         if (len(head) == 3 and head[:2] == ["BITMAP", str(count)]

@@ -3,6 +3,7 @@ from threading import Lock
 from time import monotonic
 
 from src.common.transport import Conn
+from .deadline import DeadlineSocket
 
 
 class ProtocolError(ValueError):
@@ -32,28 +33,18 @@ class TrackerLink:
             timeout = min(timeout, self.max_timeout)
             deadline = monotonic()+timeout
 
-            def line(conn):
-                """후속 줄도 같은 응답 마감 안에서 읽음."""
-                remaining = deadline-monotonic()
-                if remaining <= 0:
-                    raise TimeoutError("Tracker response deadline")
-                conn.sock.settimeout(remaining)
-                return conn.read_line()
-
             try:
                 conn = self.conn
                 if conn is None:
-                    conn = Conn(socket.create_connection(self.address, timeout=timeout))
+                    conn = Conn(DeadlineSocket(socket.create_connection(self.address, timeout=timeout)))
                     self.conn = conn
+                    conn.sock.deadline = deadline
                     conn.send_line(f"HELLO {self.peer_id}")
-                    if line(conn) != "OK":
+                    if conn.read_line() != "OK":
                         raise ProtocolError("HELLO rejected")
-                remaining = deadline-monotonic()
-                if remaining <= 0:
-                    raise TimeoutError("Tracker request deadline")
-                conn.sock.settimeout(remaining)
+                conn.sock.deadline = deadline
                 conn.send_line(command)
-                head = line(conn)
+                head = conn.read_line()
                 parts = head.split()
                 if parts and parts[0] in self.limits:
                     if len(parts) != 2 or not parts[1].isascii() or not parts[1].isdigit():
@@ -61,7 +52,7 @@ class TrackerLink:
                     count = int(parts[1])
                     if count > self.limits[parts[0]]:
                         raise ProtocolError("response has too many rows")
-                    return head, tuple(line(conn) for _ in range(count))
+                    return head, tuple(conn.read_line() for _ in range(count))
                 return head, ()
             except (OSError, ValueError):
                 self.close()

@@ -3,6 +3,7 @@ from threading import Event, Lock, Thread
 from time import monotonic
 
 from src.common.transport import Conn
+from .deadline import DeadlineSocket
 from .tracker_link import ProtocolError
 
 
@@ -84,7 +85,7 @@ class DownloadPool:
                 existing[1].close()
             sock = socket.socket()
             sock.settimeout(5)
-            conn = Conn(sock)
+            conn = Conn(DeadlineSocket(sock))
             self.connections[key] = address, conn
         sock.connect(address)
         return conn
@@ -116,6 +117,7 @@ class DownloadPool:
                         continue
                     if cancelled.is_set():
                         continue
+                    conn.sock.deadline = monotonic()+5.0
                     conn.send_line(f"GET {token.file} {token.idx}")
                     data = read_chunk(conn, token.idx, size)
                 except (OSError, ValueError) as exc:

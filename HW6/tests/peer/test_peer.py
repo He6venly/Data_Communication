@@ -19,6 +19,7 @@ from src.peer.download import read_chunk
 from src.peer.log import EventLog
 from src.peer.selection import Selection
 from src.peer.tracker_link import ProtocolError, TrackerLink
+from src.tracker.server import TrackerServer
 
 
 def config():
@@ -142,7 +143,7 @@ class Handler(StreamRequestHandler):
                 response = self.server.respond(row.decode().strip())
                 if response is None:
                     return
-                for piece in response if isinstance(response, tuple) else (response,):
+                for piece in (response,) if isinstance(response, bytes) else response:
                     self.wfile.write(piece)
         except OSError:
             pass
@@ -178,6 +179,26 @@ class PeerTests(unittest.TestCase):
             link.request("LIST", timeout=.15)
         self.assertEqual(link.request("LIST"), ("FILES 0", ()))
         self.assertEqual(commands.count("HELLO P4"), 2)
+
+    def test_tracker_deadline_even_when_response_keeps_arriving(self):
+        def handler(row):
+            return (b"OK\n",) if row.startswith("HELLO") else trickle()
+
+        def trickle():
+            # 각 recv에는 바이트가 계속 들어오지만 요청 시간 안에 줄은 안 끝남.
+            for _ in range(25):
+                yield b"x"
+                Event().wait(.025)
+            yield b"\n"
+
+        address = self.serve(handler)
+        link = TrackerLink(address, "P4", 1, 4)
+        self.addCleanup(link.close)
+        start = monotonic()
+        with self.assertRaises(TimeoutError):
+            link.request("LIST", timeout=.15)
+        self.assertLess(monotonic()-start, .5)
+        self.assertIsNone(link.conn)
 
     def test_data_boundary_and_bad_index_length(self):
         for wire in (b"DATA 1 3\nA\nBOK\n", b"DATA 0 3\n", b"DATA 1 -1\n", b"DATA 1 8\n"):
@@ -301,6 +322,61 @@ class PeerTests(unittest.TestCase):
         self.assertNotIn("BYE P4", commands)
         self.assertEqual(upload.calls[-1], 0.0)
         self.assertEqual(logs[-2]["ev"], "DESTROY")
+
+    def test_real_tracker_register_download_done_and_bye(self):
+        def upload(row):
+            if row.startswith("BITMAP"):
+                return b"BITMAP 2 11\n"
+            idx = int(row.split()[-1])
+            data = (b"abcdefgh", b"ijk")[idx]
+            return f"DATA {idx} {len(data)}\n".encode()+data
+
+        env = config()
+        env.update(version=1, name="local-validation", tracker={"port": 6000},
+                   progress_total_chunks=6, crashes=[], destroy=None)
+        env["download"]["policy"] = "rarest"
+        env["files"][0]["sha256"] = "0"*64
+        env["timing"].update(dead_sec=10, hang_sec=10, deadline_sec=15, report_stale_sec=3, status_every_sec=1)
+        for i, peer in enumerate(env["peers"]):
+            peer["dir"] = f"p{i+1}"
+        host, port = self.serve(upload)
+        env["peers"][0].update(host=host, port=port)
+        tracker = TrackerServer(env=env, emit=lambda *a, **kw: None, port=0, host="127.0.0.1")
+        tracker.start()
+        self.addCleanup(tracker.close)
+        for peer in env["peers"][:3]:
+            pid = peer["id"]
+            link = TrackerLink(tracker.address, pid, 1, 4)
+            self.addCleanup(link.close)
+            if pid == "P1":
+                self.assertEqual(link.request(f"REGISTER P1 {port} data 11 8"), ("OK", ()))
+            self.assertEqual(link.request(f"DONE {pid} FULL"), ("OK", ()))
+        code, store, _, logs = self.run_peer(env, tracker.address)
+        self.assertEqual(code, 0, logs)
+        self.assertEqual(store.received, {0: b"abcdefgh", 1: b"ijk"})
+        with tracker.state.lock:
+            self.assertIn("P4", tracker.state.byes)
+            self.assertIn("P4", tracker.state.holders["data"])
+            self.assertEqual(tracker.state.done["P4"], ("FULL", ""))
+
+    def test_lost_done_ack_still_sends_undone_when_source_returns(self):
+        env, store = config(), Store()
+        store.prepare_download("data")
+        selection = Selection(env, "rarest", 13)
+        messages = []
+        class Link:
+            def request(self, command, timeout):
+                messages.append(command)
+                if command.startswith("DONE"):
+                    raise TimeoutError("DONE reply lost")
+                return "OK", ()
+        control = Control(env, env["peers"][-1], Link(), store, selection, None, lambda *a, **kw: None)
+        control.update_done(store.snapshot().files, 1)
+        with self.assertRaises(TimeoutError):
+            control.update_done(store.snapshot().files, 1.2)
+        selection.update("data", "P1", ("127.0.0.1", 7001), "01")
+        control.update_done(store.snapshot().files, 1.3)
+        self.assertEqual(messages, ["DONE P4 PARTIAL data:2", "UNDONE P4"])
 
     def test_tracker_lost_from_start(self):
         code, store, _, logs = self.run_peer(config(), self.serve(lambda row: None))

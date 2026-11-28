@@ -22,6 +22,7 @@ class Control:
         self.holders = {}
         self.zero_since = {}
         self.done = None
+        self.pending_done = None
         self.last_ok = monotonic()
         self.next_heartbeat = self.next_report = self.next_peers = self.next_bitmap = 0
         self.cursor = 0
@@ -162,11 +163,16 @@ class Control:
             elif f.state != FileState.SEED or f.name not in self.registered:
                 ready = False
         target = ("PARTIAL", " ".join(detail)) if detail else ("FULL", "")
-        if self.done is not None and (not ready or self.done != target):
+        previous = self.pending_done or self.done
+        if previous is not None and (not ready or previous != target):
             self.ok(f"UNDONE {self.pid}")
             self.done = None
+            self.pending_done = None
             self.emit("UNDONE")
         if ready and self.done != target:
+            # 응답이 끊겨도 Tracker에 DONE이 반영됐을 수 있어서 보낸 값을 남겨둠.
+            self.pending_done = target
             self.ok(f"DONE {self.pid} {target[0]} {target[1]}".rstrip())
             self.done = target
+            self.pending_done = None
             self.emit("DONE", kind=target[0], detail=target[1])
