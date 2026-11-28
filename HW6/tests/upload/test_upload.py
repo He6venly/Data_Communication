@@ -77,6 +77,43 @@ class UploadTests(unittest.TestCase):
         self.assertEqual(conn.read_line(), "ERR BADCMD")
         self.assertEqual(self.store.snapshot().sent_bytes, 3)
 
+    def test_stop_grace_allows_active_upload_request_to_finish(self) -> None:
+        """stop은 새 연결을 닫되 유예 중 이미 처리 중인 GET 응답은 끝내게 한다."""
+        limiter_entered = threading.Event()
+        allow_response = threading.Event()
+
+        class WaitingLimiter:
+            def take(self, _size: int) -> None:
+                limiter_entered.set()
+                if not allow_response.wait(2):
+                    raise TimeoutError("테스트 응답 허용 시간 초과")
+
+        self.server._limiter = WaitingLimiter()
+        sock = socket.create_connection(("127.0.0.1", self.port), timeout=2)
+        sock.settimeout(2)
+        conn = Conn(sock)
+        conn.send_line("GET sample.bin 1")
+        self.assertTrue(limiter_entered.wait(2))
+
+        stop_thread = threading.Thread(target=self.server.stop, kwargs={"grace_sec": 1.0})
+        stop_thread.start()
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            with self.server._lock:
+                listener_closed = self.server._stopped and self.server._listener is None
+            if listener_closed:
+                break
+            time.sleep(0.01)
+        self.assertTrue(listener_closed)
+
+        allow_response.set()
+        header = conn.read_line().split()
+        self.assertEqual(header, ["DATA", "1", "3"])
+        self.assertEqual(conn.read_exact(3), b"ijk")
+        conn.close()
+        stop_thread.join(2)
+        self.assertFalse(stop_thread.is_alive())
+
     def test_shared_limiter_and_stalled_bar(self) -> None:
         """같은 제한기 객체를 쓰고 정지 상태의 빈 구간을 x로 표시한다."""
         limiter = RateLimiter(1024)

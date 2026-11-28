@@ -232,8 +232,6 @@ class UploadServer:
             if self._stopped:
                 return
             self._stopped = True
-            self._online = False
-            self._generation += 1
             listener, self._listener = self._listener, None
             if listener is not None:
                 try:
@@ -247,6 +245,9 @@ class UploadServer:
                     break
             time.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
         with self._lock:
+            # listener는 닫았지만 유예 중 기존 연결은 현재 세대로 응답할 수 있게 둔다.
+            self._online = False
+            self._generation += 1
             self._close_connections_locked()
             threads = list(self._all_handlers)
             accept = self._accept_thread
@@ -258,4 +259,4 @@ class UploadServer:
                 thread.join(max(0.0, join_deadline - time.monotonic()))
         with self._lock:
             if self._handlers or (accept is not None and accept.is_alive()):
-                raise ShutdownError("UploadServer 스레드가 종료되지 않음")\n
+                raise ShutdownError("UploadServer 스레드가 종료되지 않음")
