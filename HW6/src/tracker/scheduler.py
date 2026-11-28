@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from .observer import replica_safe
+from .observer import observe_locked, replica_safe
 
 if TYPE_CHECKING:
     from .state import TrackerState
@@ -32,6 +32,8 @@ def check_completion(state: TrackerState, now: float) -> None:
         return
     live = [pid for pid in state.peers if state.is_live(pid, now)]
     if live and all(pid in state.done for pid in live):
+        # 다음 관측 주기 전에 종료되어도 마지막 fresh REPORT의 복제 지표를 보존함.
+        observe_locked(state, now)
         state.alldone_at = state.elapsed(now)
         state.queue_event("ALLDONE", live=live, done={p: d[0] for p, d in state.done.items()})
         state.drop_unclaimed()
