@@ -6,6 +6,24 @@ from unit2_support import StateCase
 class ObserverTests(StateCase):
     """대역 REPORT를 조합해 파일별 사본과 파괴 기준을 확인함."""
 
+    def test_completion_observes_fresh_reports_before_freezing_metrics(self):
+        """다음 주기 관측 전에 ALLDONE이 되어도 최신 복제 보고를 놓치지 않음."""
+        self.join_all()
+        self.clock.advance(.25)
+        for file in self.env["files"]:
+            count = (file["size"] + 7) // 8
+            self.report("P4", file["name"], "1" * count)
+            self.report(file["origin"], file["name"], "1" * count, count, count)
+        for peer in self.env["peers"]:
+            have = sum((f["size"] + 7) // 8 for f in self.env["files"] if f["origin"] != peer["id"])
+            self.cmd(f"HEARTBEAT {peer['id']} {have}")
+            self.cmd(f"DONE {peer['id']} FULL")
+        snap = self.state.snapshot()
+        self.assertEqual(snap["T_rep"], dict.fromkeys(["a.bin", "b.bin", "c.bin"], .25))
+        self.assertEqual(snap["p_rep"], 1)
+        events = [event for event, _ in self.events]
+        self.assertLess(events.index("ALL_REPLICATED"), events.index("ALLDONE"))
+
     def test_origin_exclusion_union_and_first_observation(self):
         """원본을 제외한 여러 피어의 OR와 최초 관측 통계를 고정함."""
         self.join_all()
