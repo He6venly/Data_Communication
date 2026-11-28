@@ -30,6 +30,8 @@ class StatusScreen:
     ) -> None:
         """같은 화면 스레드가 중복 생성되지 않도록 공급 함수를 한 번 등록한다."""
         with self._lock:
+            if not self.stream.isatty():
+                return
             if self._thread is not None and self._thread.is_alive():
                 return
             self._done.clear()
@@ -60,7 +62,7 @@ class StatusScreen:
         """PeerView 복사본과 최근 로그를 사람이 읽는 상태판 문자열로 만든다."""
         assert self._snapshot is not None and self._recent is not None
         view = self._snapshot()
-        state = "ONLINE" if view.online else "OFFLINE"
+        state = "ONLINE" if view.online else "CRASHED"
         lines = [
             f"Mini-Torrent {view.peer_id}  t={view.elapsed_sec:6.1f}s  {state}  policy={view.policy}",
             f"UP {view.actual_up_kbps:7.1f}/{view.up_kbps} KB/s   DOWN {view.actual_down_kbps:7.1f}/{view.down_kbps} KB/s",
@@ -71,7 +73,7 @@ class StatusScreen:
             pct = count * 100 / file.nchunks if file.nchunks else 0.0
             lines.append(
                 f"{file.name:<16} [{self._bar(file.bitmap, stalled=file.state == FileState.STALLED)}] "
-                f"{pct:5.1f}% {shown}"
+                f"{pct:5.1f}% {count}/{file.nchunks} {shown}"
             )
         lines.append("Recent events:")
         lines.extend(self._recent(5))
