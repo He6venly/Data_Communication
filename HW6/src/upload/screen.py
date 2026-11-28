@@ -100,4 +100,4 @@ class StatusScreen:
         if thread.is_alive():
             from src.common.contracts import ShutdownError
             raise ShutdownError("상태 화면 스레드가 종료되지 않음")
-        self._thread = None\n
+        self._thread = None

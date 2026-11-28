@@ -78,4 +78,4 @@ class PositionalFile:
             self._fd = None
         if self._file is not None:
             self._file.close()
-            self._file = None\n
+            self._file = None

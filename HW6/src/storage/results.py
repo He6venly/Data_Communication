@@ -29,4 +29,4 @@ def save_results(path: Path, bitmap: str) -> None:
     if missing:
         lost_path.write_text(missing, encoding="ascii")
     elif lost_path.exists():
-        lost_path.unlink()\n
+        lost_path.unlink()

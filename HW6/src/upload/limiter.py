@@ -23,4 +23,4 @@ class RateLimiter:
             self._next_at = start + size / self.rate
         delay = start - now
         if delay > 0:
-            time.sleep(delay)\n
+            time.sleep(delay)
