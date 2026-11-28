@@ -79,6 +79,13 @@ class UploadTests(unittest.TestCase):
 
     def test_stop_grace_allows_active_upload_request_to_finish(self) -> None:
         """stop은 새 연결을 닫되 유예 중 이미 처리 중인 GET 응답은 끝내게 한다."""
+        self._check_stop_grace(peer_stopping=False)
+
+    def test_peer_stopping_preserves_active_upload_grace(self) -> None:
+        """Peer가 stopping을 먼저 설정해도 진행 응답은 완료하고 다음 GET은 막는다."""
+        self._check_stop_grace(peer_stopping=True)
+
+    def _check_stop_grace(self, *, peer_stopping: bool) -> None:
         limiter_entered = threading.Event()
         allow_response = threading.Event()
 
@@ -95,6 +102,8 @@ class UploadTests(unittest.TestCase):
         conn.send_line("GET sample.bin 1")
         self.assertTrue(limiter_entered.wait(2))
 
+        if peer_stopping:
+            self.stopping.set()
         stop_thread = threading.Thread(target=self.server.stop, kwargs={"grace_sec": 1.0})
         stop_thread.start()
         deadline = time.monotonic() + 2
@@ -106,13 +115,17 @@ class UploadTests(unittest.TestCase):
             time.sleep(0.01)
         self.assertTrue(listener_closed)
 
+        conn.send_line("GET sample.bin 0")
         allow_response.set()
         header = conn.read_line().split()
         self.assertEqual(header, ["DATA", "1", "3"])
         self.assertEqual(conn.read_exact(3), b"ijk")
+        with self.assertRaises(ConnectionError):
+            conn.read_line()
         conn.close()
         stop_thread.join(2)
         self.assertFalse(stop_thread.is_alive())
+        self.assertEqual(self.store.snapshot().sent_bytes, 3)
 
     def test_shared_limiter_and_stalled_bar(self) -> None:
         """같은 제한기 객체를 쓰고 정지 상태의 빈 구간을 x로 표시한다."""

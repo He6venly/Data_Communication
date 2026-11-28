@@ -132,7 +132,7 @@ class UploadServer:
         """연결을 받아 연결마다 전용 handler 스레드를 배정한다."""
         while True:
             with self._lock:
-                if not self._online or generation != self._generation:
+                if not self._can_start_request(generation):
                     return
             try:
                 sock, _ = listener.accept()
@@ -142,7 +142,7 @@ class UploadServer:
                 return
             sock.settimeout(5.0)
             with self._lock:
-                if not self._online or generation != self._generation:
+                if not self._can_start_request(generation):
                     sock.close()
                     continue
                 self._all_handlers = {t for t in self._all_handlers if t.is_alive()}
@@ -160,7 +160,12 @@ class UploadServer:
     def _is_current(self, generation: int) -> bool:
         """스레드가 현재 online 세대에서 응답할 수 있는지 확인한다."""
         with self._lock:
-            return self._online and generation == self._generation and not self.stopping.is_set()
+            return self._online and generation == self._generation
+
+    def _can_start_request(self, generation: int) -> bool:
+        """종료 신호 뒤에는 새 요청을 막고 이미 시작한 응답만 유예한다."""
+        with self._lock:
+            return self._is_current(generation) and not self._stopped and not self.stopping.is_set()
 
     def _respond(
         self, conn: Conn, sock: socket.socket, generation: int, data: bytes, *, payload_size: int = 0
@@ -175,8 +180,10 @@ class UploadServer:
         """한 TCP 연결에서 BITMAP·GET을 반복 처리하고 잘못된 명령은 유지한다."""
         conn = Conn(sock)
         try:
-            while self._is_current(generation):
+            while self._can_start_request(generation):
                 line = conn.read_line()
+                if not self._can_start_request(generation):
+                    break
                 fields = line.split()
                 if len(fields) == 2 and fields[0] == "BITMAP":
                     name = fields[1]
