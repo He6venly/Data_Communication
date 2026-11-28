@@ -74,6 +74,7 @@
   REPLICATED
     file: 파일 이름. t_start: Tracker START 기준 최초 복제 관측 초.
     upstat: 마지막 원본 REPORT의 [sent, distinct], 미보고 시 null.
+    sent는 송신 청크 횟수, distinct는 송신한 서로 다른 idx 수임.
     progress: 관측 시 전체 진행률.
     원본 제외 fresh live bitmap OR가 처음 모두 1일 때 기록함.
 
@@ -207,21 +208,3 @@
     code: 0=ALLDONE, 1=설정·원본 오류, 2=중단·실행 오류, 3=희생자.
     up_mb, down_mb: 전체 성공 송신·수신 commit 누적 바이트 / 2^20.
     하위 구성요소·스레드 정리와 결과 저장 뒤 마지막으로 기록함.
-
-
-4. 집계 시 주의점
-----------------------------------------------------------------
-
-  sent는 전체 DATA를 성공 송신한 청크 횟수, distinct는 서로 다른
-  idx의 수임. REPORT로 Tracker에 전달하며 청크별 SEND 로그는 없음.
-  업로드 출처는 다른 Peer의 RECV.src로 대조함.
-
-  전체 평균 속도와 첫 RECV~마지막 RECV의 구간 평균을 구분함.
-  청크 길이는 min(chunk_size, size - idx*chunk_size)로 계산함.
-  hash 재수신 때 누적 바이트는 유지하지만 해당 시도 sources는 초기화함.
-  서로 다른 프로세스의 t는 시작점이 다르므로 시간 정렬 기준을 맞춤.
-
-  Tracker CMD의 t와 report T_destroy는 pending 등록 시점임.
-  실제 지시 전달은 CMD_DELIVERED와 crashes_sent로 확인함.
-  오류로 로그 파일을 기록할 수 없는 상황에서는 마지막 EXIT 저장도
-  보장하지 않으므로 stderr·실제 프로세스 종료 코드를 함께 확인함.
