@@ -1,6 +1,6 @@
 # HW6 Mini-Torrent
 
-데이터통신 2조 개발 기준임. **안선효 40% · 황대겸 30% · 황왕석 30%**의 분업을 기준으로 패키지·인터페이스·독립 검증 범위를 정함. 공통 통신과 Tracker 전체는 구현되었으며 독립 Tracker 프로세스·TCP 대역 피어로 검사됨. Peer 및 나머지 구성은 아래 구현 계약을 따름. 실제 Peer 통합·원격 실행 결과와 성능 수치는 아직 없음.
+데이터통신 2조 개발 기준임. **안선효 40% · 황대겸 30% · 황왕석 30%**의 분업으로 공통 통신·Tracker·Peer·저장소·업로드·도구를 통합함. Windows·Python 3.12.14에서 전체 85개 테스트를 통과함. 실제 Tracker 1개와 Peer 4개의 독립 프로세스로 로컬 DEV 공식 verify와 추가 정합성 검사 PASS를 확인함. 별도 작은 env로 rarest FULL·원본 파괴 후 PARTIAL 수렴·ABORT·tracker_lost를 확인함. 외부 VM 제출 7회·실측 분석·시연은 미완료임. 프로그램 설명은 `Readme.txt`, 이벤트 사전은 `AllDefinedLogs.txt`를 따르며 실행 결과·실측 분석란은 비워 둠.
 
 공식 기준은 `HW6description.pdf`와 `HW6studentSpec.pdf`임. `HW6explanation.pdf`·`HW6QnA.pdf`는 세부 해설, `hw6_student_kit/Python/`은 원본 env·검증 도구·허용 lib의 기준으로 사용함. 위치 지정 파일 I/O는 `pwriteExplanation/`의 가이드와 예제를 참고함. 배포 원본은 로컬에 보존함.
 
@@ -14,7 +14,7 @@
 | 황대겸 30% | `src/peer/`, `tests/peer/` | `hw6/peer` | Peer 진입점·Tracker 연결·control, worker pool·청크/소스 선택·제한·재시도, crash/rejoin·STALLED·DONE·종료 조율 |
 | 황왕석 30% | `src/storage/`, `src/upload/`, `tools/`, `tests/storage/`, `tests/upload/`, `tests/tools/` | `hw6/storage-upload` | 파일·bitmap·해시·결과 저장, 업로드 서버·공유 UP 제한기, 화면, 실행·결과 보관·추가 검사 도구·시연 자료 |
 
-소유 경로는 저장소 `HW6/` 기준임. 안선효의 1·2단위는 main에 합쳐졌고 3단위는 `hw6/tracker-unit3`에서 관리함. 표의 다른 브랜치 이름은 각 담당의 작업 기준임. 기존 체크아웃과 사용자 변경을 보존하며 새 워크트리를 만들지 않음. 상대 담당의 내부 파일을 직접 수정하지 않고 아래 공개 인터페이스와 대역으로 독립 구현함. 각 담당이 자기 코드의 테스트와 로그 정의를 작성하고 안선효가 최종 문서·결과를 합침.
+소유 경로는 저장소 `HW6/` 기준임. 세 담당의 구현은 main에 통합됨. 표의 브랜치 이름과 아래 작업 3단위는 담당 경계·개발 이력의 기준임. 기존 체크아웃과 사용자 변경을 보존하며 새 워크트리를 만들지 않음. 각 담당이 자기 코드의 테스트와 로그 정의를 작성하고 안선효가 최종 문서·결과를 합침.
 
 ### 안선효: Tracker·통합 40%
 
@@ -115,9 +115,9 @@ Python 3.12 이상과 표준 라이브러리를 사용함. 기존 Python 과제 
 
 위치 지정 파일 I/O는 Linux의 `os.pread/pwrite`, Windows의 표준 `mmap`을 감싸는 동일 인터페이스로 설계함. 제공 mmap 예제가 근거임. Windows에서는 파일 크기를 먼저 확보하고, 매핑·파일 핸들을 닫은 뒤 rename함. 공유 파일 오프셋을 바꾸는 `seek + write`는 사용하지 않음. Windows 지원과 동시 종료·rename 동작은 구현 후 검증할 항목임.
 
-### 구현할 파일 구성
+### 파일 구성
 
-현재 제공된 코드는 공유 contracts·Conn과 Tracker 전체 및 해당 검사임. Peer·저장소·업로드·도구는 구현 전임. 실행 디렉터리는 `HW6/`, `src/`와 그 하위 폴더는 초기화 로직 없는 Python 네임스페이스 패키지로 구성함. 담당 내부의 파일 분리는 조정할 수 있으나 소유 경로와 공개 계약은 유지함.
+공유 contracts·Conn, Tracker·Peer·저장소·업로드·도구와 해당 검사가 제공됨. 실행 디렉터리는 `HW6/`, `src/`와 그 하위 폴더는 초기화 로직 없는 Python 네임스페이스 패키지로 구성함. 아래 구성과 공개 계약을 구현 기준으로 유지함.
 
 ```text
 HW6/
@@ -515,7 +515,7 @@ control이나 handler가 자신을 join하거나 finalize를 직접 호출하지
 
 ### 실행 방법
 
-Tracker 명령은 실행 가능함. 아래 Peer 명령은 조원 구현을 합친 뒤 적용할 계약임. `HW6/`에서 실행하며 `KIT`는 각 실행 환경의 `hw6_student_kit/Python` 실제 경로, `TRACKER_IP`는 실제 주소로 바꿈. 양쪽은 같은 원본 env를 사용함. Windows는 `python`, Linux·WSL은 `python3`를 사용함. Tracker는 현재 작업 폴더의 `logs/tracker.jsonl`과 `report.json`을 생성하며 START 전에는 피어 네 명의 HELLO를 기다림.
+Tracker와 Peer 명령은 통합 코드의 실행 방법임. `HW6/`에서 실행하며 `KIT`는 각 실행 환경의 `hw6_student_kit/Python` 실제 경로, `TRACKER_IP`는 실제 주소로 바꿈. 양쪽은 같은 원본 env를 사용함. Windows는 `python`, Linux·WSL은 `python3`를 사용함. Tracker는 현재 작업 폴더의 `logs/tracker.jsonl`과 `report.json`을 생성하며 START 전에는 피어 네 명의 HELLO를 기다림.
 
 ```text
 python "KIT/lib/env_example.py" --env "KIT/envs/B.json" --id P3
@@ -554,7 +554,7 @@ Peer는 기본 포트여도 IP·PORT를 모두 받음. Tracker를 6100으로 띄
 
 ## 분석과 최종 제출
 
-실측표에는 Run별 T_alldone·T_done, Peer별 평균 송수신 속도와 한도 대비 비율, 출처 분포와 P4 재공유량, CRASH·FAIL·BAN 수, T_rep·p_rep·dup_ratio, 파괴·DEAD·마지막 DONE, C2 커버리지·손실 수를 기록함. 현재는 측정값이 없으므로 참고 구현의 숫자를 결과로 넣지 않음.
+실측표에는 Run별 T_alldone·T_done, Peer별 평균 송수신 속도와 한도 대비 비율, 출처 분포와 P4 재공유량, CRASH·FAIL·BAN 수, T_rep·p_rep·dup_ratio, 파괴·DEAD·마지막 DONE, C2 커버리지·손실 수를 기록함. 외부 VM 제출 실행의 측정값은 없으며 로컬 검사와 구분함. Readme.txt의 결과·실측 분석란은 비워 두고 참고 구현의 숫자로 채우지 않음.
 
 속도는 명세의 첫 RECV부터 마지막 RECV 구간 평균과 실행 전체 평균의 측정 구간을 구분함. 실제 청크 길이로 바이트를 합산하고, 상대 Peer 로그를 합쳐 업로드를 추정할 때는 프로세스별 시계 차이를 명시함. C3에서는 로그를 Tracker START 기준으로 정렬한 뒤 실제 파괴 시점까지 출처를 셈. rarest가 복제를 앞당겨도 전체 완료가 늦을 수 있는 원인을 원본 쏠림·재공유·서로 다른 실제 파괴 시각으로 분석함. 동점 무작위 외의 정책 개선은 필수 random·rarest 실행과 구분함.
 
@@ -604,4 +604,4 @@ Readme.txt는 조원 이름·학번·역할, 실제 언어·설치·실행, VM �
 | 40칸 막대·상태·터미널 출력 | 과제명세 §5⑦, 구현명세 §11 | 주기 제어와 화면, 황왕석 |
 | 제출 7회·bitmap/lost·검사·분석·시연 | 과제명세 §8·§9-2·§9-4–6, 구현명세 §13, PPT p.234–235 | 독립/통합 순서·분석과 최종 제출, 세 담당 |
 
-대조한 원문 범위에서 추가 미반영 필수 항목은 발견하지 못함. 공유 자료형·예외·Protocol과 Conn·공유 수신 입력·Tracker 전체 및 대역·실제 TCP·독립 프로세스 검사는 제공됨. 실제 Peer·저장소·업로드 결합 검사와 Linux VM Tracker 7회 검증이 남아 있음.
+공유 자료형·Conn·Tracker·Peer·저장소·업로드·도구를 통합하여 로컬 검사함. 문서 대조·단위 검사·로컬 DEV 및 작은 env의 결합 검사는 외부 VM 제출 7회를 대체하지 않음. 원격 7회 결과·실측 분석·시연 자료의 확인이 남아 있음.

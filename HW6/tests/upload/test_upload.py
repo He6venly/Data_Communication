@@ -115,12 +115,12 @@ class UploadTests(unittest.TestCase):
             time.sleep(0.01)
         self.assertTrue(listener_closed)
 
-        conn.send_line("GET sample.bin 0")
         allow_response.set()
         header = conn.read_line().split()
         self.assertEqual(header, ["DATA", "1", "3"])
         self.assertEqual(conn.read_exact(3), b"ijk")
         with self.assertRaises(ConnectionError):
+            conn.send_line("GET sample.bin 0")
             conn.read_line()
         conn.close()
         stop_thread.join(2)
@@ -139,17 +139,36 @@ class UploadTests(unittest.TestCase):
         # VERIFYING 표시 규칙은 렌더 결과에서 DOWN으로 확인한다.
         from dataclasses import replace
         view = PeerView(
-            peer_id="P1", elapsed_sec=1.0, online=True, policy="random", up_kbps=10000,
+            peer_id="P1", elapsed_sec=1.0, online=False, policy="random", up_kbps=10000,
             down_kbps=10000, actual_up_kbps=0.0, actual_down_kbps=0.0,
             files=(replace(file, state=FileState.VERIFYING),),
         )
-        stream = io.StringIO()
+        class TerminalBuffer(io.StringIO):
+            def isatty(self):
+                return True
+
+        stream = TerminalBuffer()
         screen = StatusScreen(stopping=threading.Event(), period_sec=1.0, stream=stream)
         screen.start(lambda: view, lambda _n: ("START",))
         time.sleep(0.05)
         screen.stop()
         self.assertIn("DOWN", stream.getvalue())
         self.assertIn("START", stream.getvalue())
+        self.assertIn("CRASHED", stream.getvalue())
+        self.assertIn("2/2", stream.getvalue())
+
+    def test_redirected_screen_does_not_render_or_start_thread(self) -> None:
+        """출력이 파일·파이프일 때 ANSI 화면과 공급 함수 호출을 생략한다."""
+        stream = io.StringIO()
+        screen = StatusScreen(stopping=threading.Event(), period_sec=.1, stream=stream)
+
+        def unexpected(*_args):
+            self.fail("redirected screen requested data")
+
+        screen.start(unexpected, unexpected)
+        self.assertIsNone(screen._thread)
+        screen.stop()
+        self.assertEqual(stream.getvalue(), "")
 
 
 if __name__ == "__main__":
