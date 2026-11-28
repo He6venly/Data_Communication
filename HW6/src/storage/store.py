@@ -81,6 +81,7 @@ class FileStore:
         self._initialized = False
         self._finalized = False
         self._serial = 0
+        self._writes_done = threading.Condition(self._lock)
         self._final_snapshot: StoreSnapshot | None = None
         self._tokens: dict[int, str] = {}
         self._released: set[int] = set()
@@ -322,12 +323,14 @@ class FileStore:
                     item.reserved_sources.pop(token.serial, None)
                     item.in_progress.discard(token.idx)
                     self._released.add(token.serial)
+                    self._writes_done.notify_all()
             raise StoreIOError(str(exc), operation="commit", file=item.name) from exc
 
         # 쓰는 동안 세대가 바뀌었다면 디스크 바이트는 두되 보유 상태에는 반영하지 않는다.
         with self._lock:
             with item.lock:
                 item.committing.discard(token.serial)
+                self._writes_done.notify_all()
                 if token.generation != self._generation or self._paused:
                     item.reserved_sources.pop(token.serial, None)
                     item.in_progress.discard(token.idx)
@@ -473,7 +476,7 @@ class FileStore:
                 return True
 
     def pause(self) -> None:
-        """첫 오프라인 전환에서 세대를 올리고 진행 중인 예약을 무효화한다."""
+        """진행 중 위치 쓰기가 끝날 때까지 기다린 뒤 기존 예약을 무효화한다."""
         with self._lock:
             self._require_initialized()
             if self._paused:
@@ -484,6 +487,9 @@ class FileStore:
                 with item.lock:
                     item.in_progress.clear()
                     item.reserved_sources.clear()
+            # commit의 파일 쓰기는 저장소 잠금 밖에서 진행되므로 완료 통지를 기다린다.
+            while any(item.committing for item in self._files.values()):
+                self._writes_done.wait()
 
     def resume(self) -> None:
         """중단된 Peer를 새 세대로 열고 기존 bitmap과 통계는 유지한다."""
@@ -547,4 +553,4 @@ class FileStore:
                         save_results(item.path, "".join("1" if bit else "0" for bit in item.bitmap))
             self._finalized = True
             self._final_snapshot = self._snapshot_locked()
-            return self._final_snapshot\n
+            return self._final_snapshot

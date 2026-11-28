@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
@@ -87,6 +88,53 @@ class FileStoreTests(unittest.TestCase):
         new = self.store.reserve("sample.bin", 0)
         self.assertNotEqual(old.serial, new.serial)
         self.store.release(new)
+
+    def test_pause_waits_for_write_before_resume(self) -> None:
+        """pause는 이미 시작된 디스크 쓰기가 끝난 뒤 반환해 재수신 바이트를 보호한다."""
+        token = self.store.reserve("sample.bin", 0)
+        handle = self.store._files["sample.bin"].handle
+        original_write = handle.write
+        write_started = threading.Event()
+        allow_write = threading.Event()
+        pause_started = threading.Event()
+        pause_done = threading.Event()
+        results = []
+
+        def slow_write(offset: int, data: bytes) -> None:
+            write_started.set()
+            self.assertTrue(allow_write.wait(2))
+            original_write(offset, data)
+
+        handle.write = slow_write
+        writer = threading.Thread(
+            target=lambda: results.append(self.store.commit(token, b"XXXXXXXX", "P1"))
+        )
+        writer.start()
+        self.assertTrue(write_started.wait(2))
+
+        def pause_store() -> None:
+            pause_started.set()
+            self.store.pause()
+            pause_done.set()
+
+        pauser = threading.Thread(target=pause_store)
+        pauser.start()
+        self.assertTrue(pause_started.wait(2))
+        self.assertFalse(pause_done.wait(0.05))
+        allow_write.set()
+        writer.join(2)
+        pauser.join(2)
+        self.assertFalse(writer.is_alive())
+        self.assertFalse(pauser.is_alive())
+        self.assertTrue(pause_done.is_set())
+        self.assertEqual(results[0].reason, "STALE")
+
+        handle.write = original_write
+        self.store.resume()
+        replacement = self.store.reserve("sample.bin", 0)
+        accepted = self.store.commit(replacement, b"abcdefgh", "P1")
+        self.assertTrue(accepted.accepted)
+        self.assertEqual(self.store.read_chunk("sample.bin", 0), b"abcdefgh")
 
     def test_hash_failure_retries_then_marks_corrupt(self) -> None:
         """해시 불일치 뒤 한 번 재수신하고 두 번째 실패를 corrupt로 보존한다."""
